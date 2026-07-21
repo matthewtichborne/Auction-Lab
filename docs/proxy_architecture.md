@@ -322,6 +322,13 @@ Flags exposed for the above, only effective for elicited proxy-mediated runs
 `--max-refinement-queries-per-bidder` caps per-bidder refinement spend;
 it defaults to `0`, which means **unlimited**, not zero allowed — there is
 no minimum-budget requirement to enable elicitation.
+`--max-total-refinement-queries` is the same idea but summed across all
+bidders (also `0`/unlimited by default). Both are safety backstops against
+runaway query volume, not tuning targets — refinement count is meant to be
+an outcome of the elicitation events and mechanism; see
+`docs/parameter_tuning_methodology.md`. Value/demand queries are already
+deduplicated per bidder/bundle (a bundle is refined at most once) regardless
+of either cap.
 
 - `--ask-initial-question` — ωnvd.
 - `--use-interest-map` — derive candidate bundles from the NL interest map

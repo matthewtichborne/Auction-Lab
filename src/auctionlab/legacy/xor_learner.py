@@ -1,4 +1,8 @@
-"""Standalone per-bidder XOR learning via single-bidder CECA.
+"""Standalone per-bidder XOR learning via single-bidder CECA (archived legacy).
+
+This module is archived legacy code and is not part of the main
+sealed/clock event-driven proxy experiments.
+
 
 Implements Algorithm 3 of Huang et al. for a single bidder: starting from an
 empty manifest, the learner issues demand queries (CECA rounds) until the

@@ -1,4 +1,8 @@
-"""CECA: Competitive Equilibrium Combinatorial Auction.
+"""CECA: Competitive Equilibrium Combinatorial Auction (archived legacy).
+
+This module is archived legacy code and is not part of the main
+sealed/clock event-driven proxy experiments.
+
 
 An iterative tâtonnement-style mechanism, structurally distinct from both
 sealed XOR VCG and the ascending clock: each round, every bidder is offered
@@ -33,9 +37,10 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Callable, Dict, List, Tuple
 
-from auctionlab.auction_types import Bundle, CecaBidderDiagnostic, CecaRoundRecord, Item
+from auctionlab.auction_types import Bundle, Item
 from auctionlab.bids.xor import XorAtomicBid, XorBid
-from auctionlab.instances.base import CecaStepResponse
+from auctionlab.instances.base import AuctionInstance  # noqa: F401  # re-exported for legacy callers
+from auctionlab.legacy.types import CecaBidderDiagnostic, CecaRoundRecord, CecaStepResponse
 from auctionlab.payments.vcg import compute_vcg_payments
 from auctionlab.solvers.wdp_ilp import (
     WdpResult,

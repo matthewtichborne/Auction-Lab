@@ -211,3 +211,29 @@ def test_epsilon_by_bidder_is_stable(comparison_instance):
     row = sealed_llm_comparison_to_row(result)
 
     assert row["epsilon_by_bidder"] == "i1:1.0;i2:1.0"
+
+
+def test_true_welfare_for_allocation_is_the_shared_trajectory_util_helper():
+    """llm_comparison re-exports the canonical helper rather than keeping its
+    own duplicate -- proxy_sealed_runner and proxy_clock_trajectory must
+    compute true welfare identically to this module's CSV rows."""
+    from auctionlab.experiments._trajectory_util import (
+        true_welfare_for_allocation as canonical,
+    )
+    from auctionlab.experiments.llm_comparison import true_welfare_for_allocation
+
+    assert true_welfare_for_allocation is canonical
+
+
+def test_true_welfare_for_allocation_ignores_reported_bid_values(comparison_instance):
+    from auctionlab.experiments.llm_comparison import true_welfare_for_allocation
+
+    # A reported/proxy allocation dict has no values attached to it -- only
+    # bundles. true_welfare_for_allocation must score those bundles against
+    # comparison_instance's ground truth, not any reported figure.
+    allocation = {"i1": frozenset({"A"}), "i2": frozenset({"B"})}
+    assert true_welfare_for_allocation(comparison_instance, allocation) == 19.0
+
+    # An unmapped bidder is treated as winning nothing (frozenset()).
+    partial = {"i1": frozenset({"A"})}
+    assert true_welfare_for_allocation(comparison_instance, partial) == 10.0

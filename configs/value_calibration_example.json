@@ -1,0 +1,9 @@
+{
+  "domains": ["home_office", "travel_package", "camera_video_kit", "kitchen_appliance_bundle", "gaming_peripherals"],
+  "num_goods": 6,
+  "num_bidders": 4,
+  "seed": 0,
+  "max_candidate_bundle_size": 2,
+  "large_bundle_size_threshold": 4,
+  "output_dir": "benchmarks/value_calibration"
+}

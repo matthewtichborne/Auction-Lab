@@ -11,13 +11,11 @@ elicitation logic.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Callable
 
-from auctionlab.auction_types import Bundle, CecaBidderDiagnostic, Item
+from auctionlab.auction_types import Bundle, Item
 from auctionlab.bids.xor import XorAtomicBid, XorBid
 from auctionlab.instances.base import (
     AuctionInstance,
-    CecaStepResponse,
     DemandResponse,
     demand_rank_key,
 )
@@ -147,76 +145,6 @@ class FullInfoAuctionProxy:
             primary_bundle=candidates[0][1],
             supplementary_atoms=supplementary_atoms,
             primary_bundles=[bundle for _key, bundle, _value in candidates[:top_k]],
-        )
-
-    def ceca_step(
-        self,
-        prices: Callable[[Bundle], float],
-        current_bundle: Bundle,
-        round_idx: int = 0,
-    ) -> CecaStepResponse:
-        """Return the bidder's truthful response to a CECA price step.
-
-        Ranks every bundle the bidder is known to value (plus
-        ``current_bundle`` itself) by XOR-induced surplus and reports
-        satisfaction only if ``current_bundle`` is already the best choice.
-        Ties are broken in favour of the status-quo ``current_bundle``.
-        """
-        self._stats.demand_queries += 1
-
-        candidate_bundles = set(self.instance.valuations[self.bidder_id]) | {
-            current_bundle
-        }
-
-        best_bundle = current_bundle
-        best_key: tuple | None = None
-        for bundle in candidate_bundles:
-            value = self.instance.value_of(self.bidder_id, bundle)
-            surplus = value - prices(bundle)
-            key = (-surplus, 0 if bundle == current_bundle else 1, tuple(sorted(bundle)), -value)
-            if best_key is None or key < best_key:
-                best_key = key
-                best_bundle = bundle
-
-        alloc_price = prices(current_bundle)
-        alloc_value = self.instance.value_of(self.bidder_id, current_bundle)
-        alloc_utility = alloc_value - alloc_price
-
-        if best_bundle == current_bundle:
-            diag = CecaBidderDiagnostic(
-                allocated_bundle=current_bundle,
-                allocated_lindahl_price=alloc_price,
-                allocated_manifest_value=alloc_value,
-                allocated_utility=alloc_utility,
-                best_bundle=None,
-                best_value=None,
-                best_price=None,
-                best_utility=None,
-                utility_gap=None,
-                satisfied=True,
-            )
-            return CecaStepResponse(satisfied=True, demanded_bundle=None, value=None, diagnostic=diag)
-
-        best_value = self.instance.value_of(self.bidder_id, best_bundle)
-        best_price = prices(best_bundle)
-        best_utility = best_value - best_price
-        diag = CecaBidderDiagnostic(
-            allocated_bundle=current_bundle,
-            allocated_lindahl_price=alloc_price,
-            allocated_manifest_value=alloc_value,
-            allocated_utility=alloc_utility,
-            best_bundle=best_bundle,
-            best_value=best_value,
-            best_price=best_price,
-            best_utility=best_utility,
-            utility_gap=best_utility - alloc_utility,
-            satisfied=False,
-        )
-        return CecaStepResponse(
-            satisfied=False,
-            demanded_bundle=best_bundle,
-            value=best_value,
-            diagnostic=diag,
         )
 
     def refine(self, event: ElicitationEvent) -> None:

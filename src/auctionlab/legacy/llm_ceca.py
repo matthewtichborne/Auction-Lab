@@ -1,4 +1,8 @@
-"""ωvd1, ωvd2, ωnvd: LLM-action-choice CECA proxies (Section 4 of the paper).
+"""ωvd1, ωvd2, ωnvd: LLM-action-choice CECA proxies (archived legacy).
+
+This module is archived legacy code and is not part of the main
+sealed/clock event-driven proxy experiments.
+
 
 Three incremental LLM proxy designs for CECA, each conforming to the
 :class:`~auctionlab.proxies.base.CecaAuctionProxy` and
@@ -42,7 +46,7 @@ from pydantic import BaseModel, ValidationError
 
 from auctionlab.auction_types import Bundle, Item
 from auctionlab.bids.xor import XorAtomicBid, XorBid
-from auctionlab.instances.base import CecaStepResponse
+from auctionlab.legacy.types import CecaStepResponse
 from auctionlab.llm.clients import LlmClient
 from auctionlab.llm.logging import LlmCallLogger, LlmCallRecord, current_timestamp
 from auctionlab.llm.parsing import extract_json_object, parse_proxy_question_response

@@ -3,7 +3,6 @@ from __future__ import annotations
 import pytest
 
 from auctionlab.llm.prompts import (
-    build_ceca_demand_query_prompt,
     build_initial_proxy_question_prompt,
     build_person_answer_prompt,
     build_provisional_valuation_prompt,
@@ -180,41 +179,6 @@ def test_initial_proxy_question_prompt_rejects_person_seed():
             person_seed="SECRET_TRUE_VALUES_DO_NOT_LEAK",
             item_descriptions=ITEM_DESCRIPTIONS,
         )
-
-
-def test_ceca_demand_query_prompt_includes_person_seed_and_dollar_zero_default():
-    # Unlike the proxy-side prompts above, the CECA demand-query prompt
-    # represents the ground-truth person answering -- it legitimately needs
-    # the seed, the inverse regression guard from the proxy-side tests.
-    prompt = build_ceca_demand_query_prompt(
-        scenario_description="A technology auction.",
-        person_seed="SECRET_TRUE_VALUES_VISIBLE_TO_PERSON",
-        item_descriptions=ITEM_DESCRIPTIONS,
-        current_bundle=frozenset({"IPAD"}),
-        bundle_prices={frozenset({"IPAD"}): 50.0, frozenset({"IPAD", "PENCIL"}): 70.0},
-    )
-
-    assert "SECRET_TRUE_VALUES_VISIBLE_TO_PERSON" in prompt
-    assert "A technology auction." in prompt
-    assert "['IPAD']" in prompt
-    assert "Price of your current bundle: 50.0" in prompt
-    assert "[IPAD,PENCIL]: 70.0" in prompt
-    # Must explain the $0-default semantics in prose, not just data.
-    assert "$0" in prompt
-    assert '"satisfied"' in prompt
-    assert '"preferred_bundle"' in prompt
-
-
-def test_ceca_demand_query_prompt_handles_no_other_priced_bundles():
-    prompt = build_ceca_demand_query_prompt(
-        scenario_description="A technology auction.",
-        person_seed="Prefers portable creative tools.",
-        item_descriptions=ITEM_DESCRIPTIONS,
-        current_bundle=frozenset({"IPAD"}),
-        bundle_prices={frozenset({"IPAD"}): 50.0},
-    )
-
-    assert "every other bundle is priced at $0" in prompt
 
 
 def test_provisional_valuation_prompt_rejects_person_seed():

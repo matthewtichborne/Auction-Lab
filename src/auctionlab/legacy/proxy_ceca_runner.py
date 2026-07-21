@@ -1,4 +1,8 @@
-"""Proxy-mediated CECA experiments.
+"""Proxy-mediated CECA experiments (archived legacy).
+
+This module is archived legacy code and is not part of the main
+sealed/clock event-driven proxy experiments.
+
 
 ``run_ceca`` remains the pure CECA engine: it only knows about a
 ``ceca_step_oracle`` callable and owns its own growing ``manifest_bids``
@@ -34,9 +38,9 @@ import sys
 from collections import defaultdict
 from dataclasses import dataclass
 
-from auctionlab.auction_types import Bundle, CecaBidderDiagnostic, validate_bidder_keys
-from auctionlab.llm.proxies import CecaTrimResult
-from auctionlab.auctions.ceca import (
+from auctionlab.auction_types import Bundle, validate_bidder_keys
+from auctionlab.legacy.types import CecaBidderDiagnostic, CecaStepResponse  # noqa: F401
+from auctionlab.legacy.ceca import (  # type: ignore[import]
     CecaConfig,
     CecaState,
     finalize_ceca,
@@ -44,9 +48,9 @@ from auctionlab.auctions.ceca import (
 )
 from auctionlab.bids.xor import XorAtomicBid, XorBid
 from auctionlab.experiments.runner import MechanismResult
-from auctionlab.instances.base import AuctionInstance, CecaStepResponse
+from auctionlab.instances.base import AuctionInstance
 from auctionlab.payments.vcg import compute_vcg_payments
-from auctionlab.proxies.base import CecaAuctionProxy, clone_xor_bid
+from auctionlab.proxies.base import clone_xor_bid
 from auctionlab.solvers.wdp_ilp import WdpResult
 
 

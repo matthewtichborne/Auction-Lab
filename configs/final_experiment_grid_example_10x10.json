@@ -1,0 +1,557 @@
+{
+  "grid_name": "pc_build_v1_final_sealed_and_topk_sweep_10x10",
+  "description": "Final held-out evaluation grid. Valuation calibration and clock thresholds are frozen (selected on the value-calibration benchmark and a development grid respectively -- see docs/parameter_tuning_methodology.md). This grid varies only the experimental treatment variables: sealed feedback rule x elicitation rounds (none/r0, allocated_bundle/r1, allocated_bundle/r3, competitive/r3, all_provisional/r3, all_provisional/r5, all_valued_bundles/r3), and clock top_k (1/2/3). pv_max_tokens is set generously (6000, an implementation budget, not tuned for welfare). No candidate-bundle cap and no per-bidder refinement-query limit are set in any arm here (per_bidder_refinement_query_limit is null) -- those only appear in a separately-labelled robustness grid; global_refinement_query_safety_limit is a high (200) safety backstop, not a tuning target.",
+  "grid_type": "final",
+  "arms": [
+    {
+      "name": "final_sealed_none_r0",
+      "label": "final",
+      "provider": "gemini",
+      "model": "gemini-3.1-flash-lite",
+      "environment": {
+        "scenario": [
+          "pc_build"
+        ],
+        "scenario_spec": "scenarios/pc_build_v1/pc_build_profiles_generated_calibrated.json",
+        "seed_type": "structured",
+        "num_goods": 10,
+        "num_bidders": 10,
+        "scenario_seed": 0
+      },
+      "proxy_candidate_policy": {
+        "proxy_type": "llm",
+        "ask_initial_question": true,
+        "use_interest_map": true,
+        "use_provisional_valuations": true,
+        "pv_max_tokens": 6000,
+        "max_candidate_bundles": null,
+        "max_bundle_size": null,
+        "interest_map_candidate_policy": null,
+        "refinement_strategy": "value_query",
+        "hybrid_alpha": 10,
+        "hybrid_delta": 0.95
+      },
+      "valuation_calibration": {
+        "epsilon": 1.0,
+        "discount_inferred": true,
+        "disable_anchor_values": false
+      },
+      "sealed_treatment": {
+        "sealed_feedback_rule": "none",
+        "sealed_elicitation_rounds": 0
+      },
+      "clock_treatment": {
+        "top_k": [
+          1
+        ],
+        "clock_tie_threshold": 50.0,
+        "clock_margin_threshold": 50.0,
+        "price_step": 25.0,
+        "max_rounds": 40,
+        "reserve": 0.0
+      },
+      "safety_limits": {
+        "per_bidder_refinement_query_limit": null,
+        "global_refinement_query_safety_limit": 200
+      },
+      "elicited_clock": false,
+      "skip_baselines": false,
+      "extra_cli_args": {}
+    },
+    {
+      "name": "final_sealed_allocated_bundle_r1",
+      "label": "final",
+      "provider": "gemini",
+      "model": "gemini-3.1-flash-lite",
+      "environment": {
+        "scenario": [
+          "pc_build"
+        ],
+        "scenario_spec": "scenarios/pc_build_v1/pc_build_profiles_generated_calibrated.json",
+        "seed_type": "structured",
+        "num_goods": 10,
+        "num_bidders": 10,
+        "scenario_seed": 0
+      },
+      "proxy_candidate_policy": {
+        "proxy_type": "llm",
+        "ask_initial_question": true,
+        "use_interest_map": true,
+        "use_provisional_valuations": true,
+        "pv_max_tokens": 6000,
+        "max_candidate_bundles": null,
+        "max_bundle_size": null,
+        "interest_map_candidate_policy": null,
+        "refinement_strategy": "value_query",
+        "hybrid_alpha": 10,
+        "hybrid_delta": 0.95
+      },
+      "valuation_calibration": {
+        "epsilon": 1.0,
+        "discount_inferred": true,
+        "disable_anchor_values": false
+      },
+      "sealed_treatment": {
+        "sealed_feedback_rule": "allocated_bundle",
+        "sealed_elicitation_rounds": 1
+      },
+      "clock_treatment": {
+        "top_k": [
+          1
+        ],
+        "clock_tie_threshold": 50.0,
+        "clock_margin_threshold": 50.0,
+        "price_step": 25.0,
+        "max_rounds": 40,
+        "reserve": 0.0
+      },
+      "safety_limits": {
+        "per_bidder_refinement_query_limit": null,
+        "global_refinement_query_safety_limit": 200
+      },
+      "elicited_clock": false,
+      "skip_baselines": true,
+      "extra_cli_args": {}
+    },
+    {
+      "name": "final_sealed_allocated_bundle_r3",
+      "label": "final",
+      "provider": "gemini",
+      "model": "gemini-3.1-flash-lite",
+      "environment": {
+        "scenario": [
+          "pc_build"
+        ],
+        "scenario_spec": "scenarios/pc_build_v1/pc_build_profiles_generated_calibrated.json",
+        "seed_type": "structured",
+        "num_goods": 10,
+        "num_bidders": 10,
+        "scenario_seed": 0
+      },
+      "proxy_candidate_policy": {
+        "proxy_type": "llm",
+        "ask_initial_question": true,
+        "use_interest_map": true,
+        "use_provisional_valuations": true,
+        "pv_max_tokens": 6000,
+        "max_candidate_bundles": null,
+        "max_bundle_size": null,
+        "interest_map_candidate_policy": null,
+        "refinement_strategy": "value_query",
+        "hybrid_alpha": 10,
+        "hybrid_delta": 0.95
+      },
+      "valuation_calibration": {
+        "epsilon": 1.0,
+        "discount_inferred": true,
+        "disable_anchor_values": false
+      },
+      "sealed_treatment": {
+        "sealed_feedback_rule": "allocated_bundle",
+        "sealed_elicitation_rounds": 3
+      },
+      "clock_treatment": {
+        "top_k": [
+          1
+        ],
+        "clock_tie_threshold": 50.0,
+        "clock_margin_threshold": 50.0,
+        "price_step": 25.0,
+        "max_rounds": 40,
+        "reserve": 0.0
+      },
+      "safety_limits": {
+        "per_bidder_refinement_query_limit": null,
+        "global_refinement_query_safety_limit": 200
+      },
+      "elicited_clock": false,
+      "skip_baselines": true,
+      "extra_cli_args": {}
+    },
+    {
+      "name": "final_sealed_competitive_r3",
+      "label": "final",
+      "provider": "gemini",
+      "model": "gemini-3.1-flash-lite",
+      "environment": {
+        "scenario": [
+          "pc_build"
+        ],
+        "scenario_spec": "scenarios/pc_build_v1/pc_build_profiles_generated_calibrated.json",
+        "seed_type": "structured",
+        "num_goods": 10,
+        "num_bidders": 10,
+        "scenario_seed": 0
+      },
+      "proxy_candidate_policy": {
+        "proxy_type": "llm",
+        "ask_initial_question": true,
+        "use_interest_map": true,
+        "use_provisional_valuations": true,
+        "pv_max_tokens": 6000,
+        "max_candidate_bundles": null,
+        "max_bundle_size": null,
+        "interest_map_candidate_policy": null,
+        "refinement_strategy": "value_query",
+        "hybrid_alpha": 10,
+        "hybrid_delta": 0.95
+      },
+      "valuation_calibration": {
+        "epsilon": 1.0,
+        "discount_inferred": true,
+        "disable_anchor_values": false
+      },
+      "sealed_treatment": {
+        "sealed_feedback_rule": "competitive",
+        "sealed_elicitation_rounds": 3
+      },
+      "clock_treatment": {
+        "top_k": [
+          1
+        ],
+        "clock_tie_threshold": 50.0,
+        "clock_margin_threshold": 50.0,
+        "price_step": 25.0,
+        "max_rounds": 40,
+        "reserve": 0.0
+      },
+      "safety_limits": {
+        "per_bidder_refinement_query_limit": null,
+        "global_refinement_query_safety_limit": 200
+      },
+      "elicited_clock": false,
+      "skip_baselines": true,
+      "extra_cli_args": {}
+    },
+    {
+      "name": "final_sealed_all_provisional_r3",
+      "label": "final",
+      "provider": "gemini",
+      "model": "gemini-3.1-flash-lite",
+      "environment": {
+        "scenario": [
+          "pc_build"
+        ],
+        "scenario_spec": "scenarios/pc_build_v1/pc_build_profiles_generated_calibrated.json",
+        "seed_type": "structured",
+        "num_goods": 10,
+        "num_bidders": 10,
+        "scenario_seed": 0
+      },
+      "proxy_candidate_policy": {
+        "proxy_type": "llm",
+        "ask_initial_question": true,
+        "use_interest_map": true,
+        "use_provisional_valuations": true,
+        "pv_max_tokens": 6000,
+        "max_candidate_bundles": null,
+        "max_bundle_size": null,
+        "interest_map_candidate_policy": null,
+        "refinement_strategy": "value_query",
+        "hybrid_alpha": 10,
+        "hybrid_delta": 0.95
+      },
+      "valuation_calibration": {
+        "epsilon": 1.0,
+        "discount_inferred": true,
+        "disable_anchor_values": false
+      },
+      "sealed_treatment": {
+        "sealed_feedback_rule": "all_provisional",
+        "sealed_elicitation_rounds": 3
+      },
+      "clock_treatment": {
+        "top_k": [
+          1
+        ],
+        "clock_tie_threshold": 50.0,
+        "clock_margin_threshold": 50.0,
+        "price_step": 25.0,
+        "max_rounds": 40,
+        "reserve": 0.0
+      },
+      "safety_limits": {
+        "per_bidder_refinement_query_limit": null,
+        "global_refinement_query_safety_limit": 200
+      },
+      "elicited_clock": false,
+      "skip_baselines": true,
+      "extra_cli_args": {}
+    },
+    {
+      "name": "final_sealed_all_provisional_r5",
+      "label": "final",
+      "provider": "gemini",
+      "model": "gemini-3.1-flash-lite",
+      "environment": {
+        "scenario": [
+          "pc_build"
+        ],
+        "scenario_spec": "scenarios/pc_build_v1/pc_build_profiles_generated_calibrated.json",
+        "seed_type": "structured",
+        "num_goods": 10,
+        "num_bidders": 10,
+        "scenario_seed": 0
+      },
+      "proxy_candidate_policy": {
+        "proxy_type": "llm",
+        "ask_initial_question": true,
+        "use_interest_map": true,
+        "use_provisional_valuations": true,
+        "pv_max_tokens": 6000,
+        "max_candidate_bundles": null,
+        "max_bundle_size": null,
+        "interest_map_candidate_policy": null,
+        "refinement_strategy": "value_query",
+        "hybrid_alpha": 10,
+        "hybrid_delta": 0.95
+      },
+      "valuation_calibration": {
+        "epsilon": 1.0,
+        "discount_inferred": true,
+        "disable_anchor_values": false
+      },
+      "sealed_treatment": {
+        "sealed_feedback_rule": "all_provisional",
+        "sealed_elicitation_rounds": 5
+      },
+      "clock_treatment": {
+        "top_k": [
+          1
+        ],
+        "clock_tie_threshold": 50.0,
+        "clock_margin_threshold": 50.0,
+        "price_step": 25.0,
+        "max_rounds": 40,
+        "reserve": 0.0
+      },
+      "safety_limits": {
+        "per_bidder_refinement_query_limit": null,
+        "global_refinement_query_safety_limit": 200
+      },
+      "elicited_clock": false,
+      "skip_baselines": true,
+      "extra_cli_args": {}
+    },
+    {
+      "name": "final_sealed_all_valued_bundles_r3",
+      "label": "final",
+      "provider": "gemini",
+      "model": "gemini-3.1-flash-lite",
+      "environment": {
+        "scenario": [
+          "pc_build"
+        ],
+        "scenario_spec": "scenarios/pc_build_v1/pc_build_profiles_generated_calibrated.json",
+        "seed_type": "structured",
+        "num_goods": 10,
+        "num_bidders": 10,
+        "scenario_seed": 0
+      },
+      "proxy_candidate_policy": {
+        "proxy_type": "llm",
+        "ask_initial_question": true,
+        "use_interest_map": true,
+        "use_provisional_valuations": true,
+        "pv_max_tokens": 6000,
+        "max_candidate_bundles": null,
+        "max_bundle_size": null,
+        "interest_map_candidate_policy": null,
+        "refinement_strategy": "value_query",
+        "hybrid_alpha": 10,
+        "hybrid_delta": 0.95
+      },
+      "valuation_calibration": {
+        "epsilon": 1.0,
+        "discount_inferred": true,
+        "disable_anchor_values": false
+      },
+      "sealed_treatment": {
+        "sealed_feedback_rule": "all_valued_bundles",
+        "sealed_elicitation_rounds": 3
+      },
+      "clock_treatment": {
+        "top_k": [
+          1
+        ],
+        "clock_tie_threshold": 50.0,
+        "clock_margin_threshold": 50.0,
+        "price_step": 25.0,
+        "max_rounds": 40,
+        "reserve": 0.0
+      },
+      "safety_limits": {
+        "per_bidder_refinement_query_limit": null,
+        "global_refinement_query_safety_limit": 200
+      },
+      "elicited_clock": false,
+      "skip_baselines": true,
+      "extra_cli_args": {}
+    },
+    {
+      "name": "final_clock_topk1",
+      "label": "final",
+      "provider": "gemini",
+      "model": "gemini-3.1-flash-lite",
+      "environment": {
+        "scenario": [
+          "pc_build"
+        ],
+        "scenario_spec": "scenarios/pc_build_v1/pc_build_profiles_generated_calibrated.json",
+        "seed_type": "structured",
+        "num_goods": 10,
+        "num_bidders": 10,
+        "scenario_seed": 0
+      },
+      "proxy_candidate_policy": {
+        "proxy_type": "llm",
+        "ask_initial_question": true,
+        "use_interest_map": true,
+        "use_provisional_valuations": true,
+        "pv_max_tokens": 6000,
+        "max_candidate_bundles": null,
+        "max_bundle_size": null,
+        "interest_map_candidate_policy": null,
+        "refinement_strategy": "value_query",
+        "hybrid_alpha": 10,
+        "hybrid_delta": 0.95
+      },
+      "valuation_calibration": {
+        "epsilon": 1.0,
+        "discount_inferred": true,
+        "disable_anchor_values": false
+      },
+      "sealed_treatment": {
+        "sealed_feedback_rule": "none",
+        "sealed_elicitation_rounds": 0
+      },
+      "clock_treatment": {
+        "top_k": [
+          1
+        ],
+        "clock_tie_threshold": 50.0,
+        "clock_margin_threshold": 50.0,
+        "price_step": 25.0,
+        "max_rounds": 40,
+        "reserve": 0.0
+      },
+      "safety_limits": {
+        "per_bidder_refinement_query_limit": null,
+        "global_refinement_query_safety_limit": 200
+      },
+      "elicited_clock": true,
+      "skip_baselines": true,
+      "extra_cli_args": {}
+    },
+    {
+      "name": "final_clock_topk2",
+      "label": "final",
+      "provider": "gemini",
+      "model": "gemini-3.1-flash-lite",
+      "environment": {
+        "scenario": [
+          "pc_build"
+        ],
+        "scenario_spec": "scenarios/pc_build_v1/pc_build_profiles_generated_calibrated.json",
+        "seed_type": "structured",
+        "num_goods": 10,
+        "num_bidders": 10,
+        "scenario_seed": 0
+      },
+      "proxy_candidate_policy": {
+        "proxy_type": "llm",
+        "ask_initial_question": true,
+        "use_interest_map": true,
+        "use_provisional_valuations": true,
+        "pv_max_tokens": 6000,
+        "max_candidate_bundles": null,
+        "max_bundle_size": null,
+        "interest_map_candidate_policy": null,
+        "refinement_strategy": "value_query",
+        "hybrid_alpha": 10,
+        "hybrid_delta": 0.95
+      },
+      "valuation_calibration": {
+        "epsilon": 1.0,
+        "discount_inferred": true,
+        "disable_anchor_values": false
+      },
+      "sealed_treatment": {
+        "sealed_feedback_rule": "none",
+        "sealed_elicitation_rounds": 0
+      },
+      "clock_treatment": {
+        "top_k": [
+          2
+        ],
+        "clock_tie_threshold": 50.0,
+        "clock_margin_threshold": 50.0,
+        "price_step": 25.0,
+        "max_rounds": 40,
+        "reserve": 0.0
+      },
+      "safety_limits": {
+        "per_bidder_refinement_query_limit": null,
+        "global_refinement_query_safety_limit": 200
+      },
+      "elicited_clock": true,
+      "skip_baselines": true,
+      "extra_cli_args": {}
+    },
+    {
+      "name": "final_clock_topk3",
+      "label": "final",
+      "provider": "gemini",
+      "model": "gemini-3.1-flash-lite",
+      "environment": {
+        "scenario": [
+          "pc_build"
+        ],
+        "scenario_spec": "scenarios/pc_build_v1/pc_build_profiles_generated_calibrated.json",
+        "seed_type": "structured",
+        "num_goods": 10,
+        "num_bidders": 10,
+        "scenario_seed": 0
+      },
+      "proxy_candidate_policy": {
+        "proxy_type": "llm",
+        "ask_initial_question": true,
+        "use_interest_map": true,
+        "use_provisional_valuations": true,
+        "pv_max_tokens": 6000,
+        "max_candidate_bundles": null,
+        "max_bundle_size": null,
+        "interest_map_candidate_policy": null,
+        "refinement_strategy": "value_query",
+        "hybrid_alpha": 10,
+        "hybrid_delta": 0.95
+      },
+      "valuation_calibration": {
+        "epsilon": 1.0,
+        "discount_inferred": true,
+        "disable_anchor_values": false
+      },
+      "sealed_treatment": {
+        "sealed_feedback_rule": "none",
+        "sealed_elicitation_rounds": 0
+      },
+      "clock_treatment": {
+        "top_k": [
+          3
+        ],
+        "clock_tie_threshold": 50.0,
+        "clock_margin_threshold": 50.0,
+        "price_step": 25.0,
+        "max_rounds": 40,
+        "reserve": 0.0
+      },
+      "safety_limits": {
+        "per_bidder_refinement_query_limit": null,
+        "global_refinement_query_safety_limit": 200
+      },
+      "elicited_clock": true,
+      "skip_baselines": true,
+      "extra_cli_args": {}
+    }
+  ]
+}

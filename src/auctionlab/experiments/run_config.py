@@ -24,8 +24,6 @@ _PRESET_STRUCTURED_6X6_DIAGNOSTIC: dict[str, Any] = {
     "scenario_seed": 0,
     "seed_type": "structured",
     "proxy_type": "llm",
-    "ceca_proxy_type": "llm",
-    "ceca_payment_rule": "both",
     "ask_initial_question": True,
     "use_interest_map": True,
     "use_provisional_valuations": True,
@@ -37,12 +35,9 @@ _PRESET_STRUCTURED_6X6_DIAGNOSTIC: dict[str, Any] = {
     # when PV underestimates synergy and displacement cost turns negative.
     "sealed_feedback_rule": "all_valued_bundles",
     "elicited_clock": True,
-    "elicited_ceca": True,
-    "ceca_no_pv": True,   # prevents CECA from converging in 1 round due to PV init
     "max_refinement_queries_per_bidder": 3,
     "max_rounds": 30,      # extra rounds help catch near-tie routing decisions
     "clock_tie_threshold": 50.0,  # tighter tie detection for bundle routing
-    "ceca_max_rounds": 20,
 }
 
 PRESETS: dict[str, dict[str, Any]] = {
@@ -108,17 +103,6 @@ def config_warnings(args: Any) -> list[str]:
             "NOTE: proxy clock elicitation is enabled with "
             "max_refinement_queries_per_bidder=0 (unlimited). "
             "Refinement budget is bounded only by elicitation-event logic."
-        )
-
-    elicited_ceca = getattr(args, "elicited_ceca", False)
-    ceca_proxy = getattr(args, "ceca_proxy_type", "llm")
-    ceca_payment = getattr(args, "ceca_payment_rule", "pay_as_bid")
-    if elicited_ceca and ceca_proxy == "llm" and ceca_payment == "pay_as_bid":
-        warnings.append(
-            "NOTE: CECA payment rule is 'pay_as_bid' (literature diagnostic). "
-            "For cross-mechanism comparison use --ceca-payment-rule vcg or both. "
-            "CECA internal elicitation always uses Lindahl-style prices; "
-            "the payment rule only affects final transfers."
         )
 
     return warnings
@@ -202,12 +186,17 @@ def format_run_config(args: Any, scenarios: list) -> list[str]:
     feedback_rule = getattr(args, "sealed_feedback_rule", "none")
     max_ref = getattr(args, "max_refinement_queries_per_bidder", 0)
     ref_str = str(max_ref) if max_ref > 0 else "unlimited"
+    max_total_ref = getattr(args, "max_total_refinement_queries", 0)
+    if max_total_ref > 0:
+        ref_str = f"{ref_str} (total cap {max_total_ref})"
     if sealed_rounds > 0:
+        trajectory = getattr(args, "sealed_trajectory", True)
         lines.append(
             f"    proxy sealed            enabled"
             f"  rounds={sealed_rounds}"
             f"  feedback_rule={feedback_rule}"
             f"  max_ref={ref_str}"
+            f"  trajectory={'on' if trajectory else 'off'}"
         )
     else:
         lines.append("    proxy sealed            disabled")
@@ -225,54 +214,6 @@ def format_run_config(args: Any, scenarios: list) -> list[str]:
         )
     else:
         lines.append("    proxy clock             disabled")
-
-    elicited_ceca = getattr(args, "elicited_ceca", False)
-    ceca_max = getattr(args, "ceca_max_rounds", 50)
-    ceca_payment = getattr(args, "ceca_payment_rule", "pay_as_bid")
-    ceca_proxy = getattr(args, "ceca_proxy_type", "llm")
-    ceca_no_pv = getattr(args, "ceca_no_pv", False)
-    _raw_ceca_modes = getattr(args, "ceca_initial_bid_mode", ["full_proxy"])
-    ceca_modes_str = "+".join(
-        _raw_ceca_modes if isinstance(_raw_ceca_modes, list) else [_raw_ceca_modes]
-    )
-    ceca_trim = getattr(args, 'ceca_atomic_trimming', True)
-    ceca_trim_tol = getattr(args, 'ceca_trim_value_tolerance', 0.0)
-    if elicited_ceca:
-        lines.append(
-            f"    proxy ceca              enabled"
-            f"  max_rounds={ceca_max}"
-            f"  payment={ceca_payment}"
-            f"  ceca_proxy={ceca_proxy}"
-            f"  mode={ceca_modes_str}"
-            + ("  no_pv" if ceca_no_pv else "")
-        )
-        lines.append(
-            "      ceca_internal_pricing   lindahl_manifest  "
-            "(VCG/pay_as_bid are final-payment rules only)"
-        )
-        lines.append(
-            f"      ceca_atomic_trimming    {'on' if ceca_trim else 'off'}"
-            + (f"  tolerance={ceca_trim_tol}" if ceca_trim else "")
-        )
-        stop_nni = getattr(args, 'ceca_stop_on_no_new_information', False)
-        stall_pat = getattr(args, 'ceca_stall_patience', 1)
-        lines.append(
-            f"      ceca_stop_on_nni       {'on' if stop_nni else 'off'}"
-            + (f"  stall_patience={stall_pat}" if stop_nni else "")
-        )
-        stop_nuc = getattr(args, 'ceca_stop_on_round_no_useful_counterexamples', False)
-        if stop_nuc:
-            lines.append("      ceca_stop_no_useful_ce on")
-        ceca_exhaust = getattr(args, "ceca_exhaust_repeated_bidders", False)
-        ceca_bsp = getattr(args, "ceca_bidder_stall_patience", 3)
-        if ceca_exhaust:
-            lines.append(
-                f"      ceca_exhaust_bidders   on  bidder_stall_patience={ceca_bsp}"
-            )
-        ceca_du = getattr(args, "ceca_demand_universe", "all_items")
-        lines.append(f"      ceca_demand_universe   {ceca_du}")
-    else:
-        lines.append("    proxy ceca              disabled")
 
     lines.append("")
     lines.append(f"  output                    {getattr(args, 'log_dir', '—')}")
@@ -342,14 +283,8 @@ def collect_arm_stats(stats: dict) -> dict:
 
     vq_llm = stats.get("value_query", CallTypeStats()).calls
     vq_gt = stats.get("value_query_gt", CallTypeStats()).calls
-    dq_llm = (
-        stats.get("demand_query", CallTypeStats()).calls
-        + stats.get("ceca_demand_query", CallTypeStats()).calls
-    )
-    dq_gt = (
-        stats.get("demand_query_gt", CallTypeStats()).calls
-        + stats.get("ceca_demand_query_gt", CallTypeStats()).calls
-    )
+    dq_llm = stats.get("demand_query", CallTypeStats()).calls
+    dq_gt = stats.get("demand_query_gt", CallTypeStats()).calls
     nl = stats.get("nl_question", CallTypeStats()).calls
     # GT entries log 0 tokens, so this sum is already correct.
     tok_in = sum(s.input_tokens for s in stats.values())

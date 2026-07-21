@@ -4,8 +4,8 @@ This module defines a *separate* event layer from the mechanism-refinement
 :class:`~auctionlab.proxies.base.ElicitationEvent` (which is a bundle-keyed
 signal emitted by running mechanisms).  The classes here are *proxy
 lifecycle* events: initialisation phases (NL question, interest map,
-provisional valuations) and mechanism dispatch (submit bid, clock demand,
-CECA step) expressed as data objects rather than direct method calls.
+provisional valuations) and mechanism dispatch (submit bid, clock demand)
+expressed as data objects rather than direct method calls.
 
 Usage (example)::
 
@@ -41,8 +41,6 @@ CLOCK_PRICES = "clock_prices"
 CLOCK_NEAR_TIE = "clock_near_tie"
 CLOCK_NEAR_ZERO_SURPLUS = "clock_near_zero_surplus"
 CLOCK_DEMAND_CHANGED = "clock_demand_changed"
-CECA_SATISFACTION = "ceca_satisfaction"
-CECA_DEMAND_COUNTEREXAMPLE = "ceca_demand_counterexample"
 
 # Set of all known event types — used by handle_event() to detect unknowns.
 _KNOWN_EVENT_TYPES: frozenset[str] = frozenset({
@@ -56,8 +54,6 @@ _KNOWN_EVENT_TYPES: frozenset[str] = frozenset({
     CLOCK_NEAR_TIE,
     CLOCK_NEAR_ZERO_SURPLUS,
     CLOCK_DEMAND_CHANGED,
-    CECA_SATISFACTION,
-    CECA_DEMAND_COUNTEREXAMPLE,
 })
 
 # Initialisation events handled by the inner LlmInferredXorProxy.
@@ -97,8 +93,6 @@ class ProxyElicitationEvent:
       :class:`~auctionlab.proxies.base.ElicitationEvent`).
     * ``clock_prices``: required ``prices`` (``dict[Item, float]``);
       optional ``top_k`` (default 1).
-    * ``ceca_satisfaction``: required ``prices`` (callable) and
-      ``current_bundle``.
     """
 
     event_type: str
@@ -124,7 +118,6 @@ class ProxyResponse:
     * ``xor_bid``: ``{"bid": XorBid}``
     * ``refinement``: ``{}`` (check ``records`` instead)
     * ``clock_demand``: ``{"demand_response": DemandResponse}``
-    * ``ceca_step``: ``{"ceca_response": CecaStepResponse}``
 
     ``records`` mirrors any :class:`~auctionlab.proxies.base.RefinementRecord`
     objects generated during the call. ``state_delta`` is a lightweight

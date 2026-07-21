@@ -2,8 +2,6 @@
 formatting, and refinement-record CSV helpers.
 
 Also covers:
-- proxy_ceca_runner metadata fields (ceca_internal_price_rule, ceca_rounds)
-- ceca_result_to_row CSV columns
 - _collect_arm_stats / _collect_initial_stats helpers in the runner script
 - refinement_records_to_rows output shape
 """
@@ -42,8 +40,6 @@ def _make_args(**kwargs) -> argparse.Namespace:
         scenario_seed=0,
         seed_type="structured",
         proxy_type="llm",
-        ceca_proxy_type="llm",
-        ceca_payment_rule="pay_as_bid",
         ask_initial_question=False,
         use_interest_map=False,
         use_provisional_valuations=False,
@@ -52,11 +48,9 @@ def _make_args(**kwargs) -> argparse.Namespace:
         max_bundle_size=2,
         top_k=[1],
         max_rounds=20,
-        ceca_max_rounds=50,
         sealed_elicitation_rounds=0,
         sealed_feedback_rule="none",
         elicited_clock=False,
-        elicited_ceca=False,
         max_refinement_queries_per_bidder=0,
         skip_baselines=False,
         ground_truth_queries=False,
@@ -77,8 +71,6 @@ class TestConfigWarnings:
             sealed_feedback_rule="competitive",
             elicited_clock=True,
             max_refinement_queries_per_bidder=3,
-            elicited_ceca=True,
-            ceca_payment_rule="vcg",
         )
         assert config_warnings(args) == []
 
@@ -115,43 +107,15 @@ class TestConfigWarnings:
         warnings = config_warnings(args)
         assert not any("unlimited" in w for w in warnings)
 
-    def test_ceca_pay_as_bid_diagnostic_note(self):
-        args = _make_args(
-            elicited_ceca=True,
-            ceca_proxy_type="llm",
-            ceca_payment_rule="pay_as_bid",
-        )
-        warnings = config_warnings(args)
-        assert any("pay_as_bid" in w and "NOTE" in w for w in warnings)
-
-    def test_no_ceca_note_when_vcg(self):
-        args = _make_args(
-            elicited_ceca=True,
-            ceca_proxy_type="llm",
-            ceca_payment_rule="vcg",
-        )
-        warnings = config_warnings(args)
-        assert not any("pay_as_bid" in w for w in warnings)
-
-    def test_no_ceca_note_when_ceca_disabled(self):
-        args = _make_args(
-            elicited_ceca=False,
-            ceca_payment_rule="pay_as_bid",
-        )
-        assert config_warnings(args) == []
-
     def test_multiple_warnings_accumulate(self):
         args = _make_args(
             sealed_elicitation_rounds=3,
             sealed_feedback_rule="none",
             elicited_clock=True,
             max_refinement_queries_per_bidder=0,
-            elicited_ceca=True,
-            ceca_proxy_type="llm",
-            ceca_payment_rule="pay_as_bid",
         )
         warnings = config_warnings(args)
-        assert len(warnings) == 3
+        assert len(warnings) == 2
 
 
 # ---------------------------------------------------------------------------
@@ -166,11 +130,11 @@ class TestPreset:
         p = PRESETS["structured-6x6-diagnostic"]
         for key in (
             "scenario", "num_goods", "num_bidders", "scenario_seed",
-            "seed_type", "proxy_type", "ceca_proxy_type", "ceca_payment_rule",
+            "seed_type", "proxy_type",
             "ask_initial_question", "use_interest_map", "use_provisional_valuations",
             "top_k", "max_bundle_size", "sealed_elicitation_rounds",
-            "sealed_feedback_rule", "elicited_clock", "elicited_ceca",
-            "max_refinement_queries_per_bidder", "max_rounds", "ceca_max_rounds",
+            "sealed_feedback_rule", "elicited_clock",
+            "max_refinement_queries_per_bidder", "max_rounds",
         ):
             assert key in p, f"missing key: {key}"
 
@@ -179,7 +143,6 @@ class TestPreset:
         assert p["num_goods"] == 6
         assert p["num_bidders"] == 6
         assert p["scenario"] == ["pc_build"]
-        assert p["ceca_payment_rule"] == "both"
         assert p["sealed_feedback_rule"] == "all_valued_bundles"
         assert p["sealed_elicitation_rounds"] == 3
         assert p["max_bundle_size"] == 3
@@ -287,12 +250,6 @@ class TestFormatRunConfig:
         combined = "\n".join(lines)
         assert "unlimited" in combined
 
-    def test_header_shows_ceca_internal_pricing(self):
-        args = _make_args(elicited_ceca=True)
-        lines = format_run_config(args, self._mock_scenarios())
-        combined = "\n".join(lines)
-        assert "lindahl_manifest" in combined
-
     def test_header_shows_ground_truth_queries(self):
         args = _make_args(ground_truth_queries=True)
         lines = format_run_config(args, self._mock_scenarios())
@@ -397,126 +354,7 @@ class TestRefinementRecordsToRows:
 
 
 # ---------------------------------------------------------------------------
-# E. CECA metadata fields (proxy_ceca_runner)
-# ---------------------------------------------------------------------------
-
-class TestCecaMetadata:
-    def _run_ceca_experiment(self, payment_rule="pay_as_bid"):
-        from auctionlab.instances.structured import make_pc_build_scenario
-        from auctionlab.experiments.proxy_ceca_runner import (
-            ProxyCecaConfig,
-            run_proxy_ceca_experiment,
-        )
-        from auctionlab.proxies.full_info import FullInfoAuctionProxy
-        from auctionlab.auctions.ceca import CecaConfig
-
-        scenario = make_pc_build_scenario(num_goods=4, num_bidders=4, seed=0)
-        instance = scenario.instance
-        proxies = [
-            FullInfoAuctionProxy(bidder_id=bid, instance=instance, initial="all_atoms")
-            for bid in instance.bidder_ids
-        ]
-        result = run_proxy_ceca_experiment(
-            instance=instance,
-            proxies=proxies,
-            ceca_config=CecaConfig(max_rounds=10),
-            proxy_config=ProxyCecaConfig(payment_rule=payment_rule),
-        )
-        return result
-
-    def test_ceca_internal_price_rule_in_metadata(self):
-        result = self._run_ceca_experiment()
-        assert "ceca_internal_price_rule" in result.metadata
-        assert result.metadata["ceca_internal_price_rule"] == "lindahl_manifest"
-
-    def test_ceca_rounds_in_metadata(self):
-        result = self._run_ceca_experiment()
-        assert "ceca_rounds" in result.metadata
-        assert isinstance(result.metadata["ceca_rounds"], int)
-        assert result.metadata["ceca_rounds"] >= 1
-
-    def test_converged_in_metadata(self):
-        result = self._run_ceca_experiment()
-        assert "converged" in result.metadata
-
-    def test_final_manifest_total_atoms_in_metadata(self):
-        result = self._run_ceca_experiment()
-        assert "final_manifest_total_atoms" in result.metadata
-        assert isinstance(result.metadata["final_manifest_total_atoms"], int)
-        assert result.metadata["final_manifest_total_atoms"] >= 0
-
-    def test_payment_rule_in_metadata_pay_as_bid(self):
-        result = self._run_ceca_experiment("pay_as_bid")
-        assert result.metadata["payment_rule"] == "pay_as_bid"
-
-    def test_payment_rule_in_metadata_vcg(self):
-        result = self._run_ceca_experiment("vcg")
-        assert result.metadata["payment_rule"] == "vcg"
-
-
-# ---------------------------------------------------------------------------
-# F. ceca_result_to_row CSV columns
-# ---------------------------------------------------------------------------
-
-class TestCecaResultToRow:
-    def _make_row(self, payment_rule="pay_as_bid"):
-        from auctionlab.instances.structured import make_pc_build_scenario
-        from auctionlab.experiments.proxy_ceca_runner import (
-            ProxyCecaConfig,
-            run_proxy_ceca_experiment,
-        )
-        from auctionlab.experiments.llm_comparison import ceca_result_to_row
-        from auctionlab.proxies.full_info import FullInfoAuctionProxy
-        from auctionlab.auctions.ceca import CecaConfig
-
-        scenario = make_pc_build_scenario(num_goods=4, num_bidders=4, seed=0)
-        instance = scenario.instance
-        proxies = [
-            FullInfoAuctionProxy(bidder_id=bid, instance=instance, initial="all_atoms")
-            for bid in instance.bidder_ids
-        ]
-        result = run_proxy_ceca_experiment(
-            instance=instance,
-            proxies=proxies,
-            ceca_config=CecaConfig(max_rounds=10),
-            proxy_config=ProxyCecaConfig(payment_rule=payment_rule),
-        )
-        return ceca_result_to_row(
-            instance_name=scenario.name,
-            instance=instance,
-            result=result,
-        )
-
-    def test_row_contains_ceca_internal_price_rule(self):
-        row = self._make_row()
-        assert "ceca_internal_price_rule" in row
-        assert row["ceca_internal_price_rule"] == "lindahl_manifest"
-
-    def test_row_contains_ceca_rounds(self):
-        row = self._make_row()
-        assert "ceca_rounds" in row
-
-    def test_row_contains_final_manifest_total_atoms(self):
-        row = self._make_row()
-        assert "final_manifest_total_atoms" in row
-
-    def test_row_payment_rule_vcg(self):
-        row = self._make_row("vcg")
-        assert row["payment_rule"] == "vcg"
-
-    def test_backward_compat_columns_still_present(self):
-        row = self._make_row()
-        for col in (
-            "instance_name", "mechanism", "full_info_welfare",
-            "proxy_reported_welfare", "proxy_true_welfare", "efficiency",
-            "converged", "stage1_welfare", "stage2_welfare",
-            "demand_query_count_by_bidder",
-        ):
-            assert col in row, f"missing backward-compat column: {col}"
-
-
-# ---------------------------------------------------------------------------
-# G. Token accounting helpers (collect_arm_stats / collect_initial_stats)
+# E. Token accounting helpers (collect_arm_stats / collect_initial_stats)
 # ---------------------------------------------------------------------------
 
 class TestCollectArmStats:
@@ -549,18 +387,8 @@ class TestCollectArmStats:
         assert result["tok_in"] == 13000
         assert "token_accounting_note" in result
 
-    def test_collect_arm_stats_ceca_demand_counted_in_dq(self):
-        from auctionlab.experiments.run_config import collect_arm_stats
-        from auctionlab.llm.logging import CallTypeStats
-        stats = {
-            "ceca_demand_query": CallTypeStats(calls=4, input_tokens=800, output_tokens=160),
-        }
-        result = collect_arm_stats(stats)
-        assert result["dq"] == 4
-
-
 # ---------------------------------------------------------------------------
-# H. explicitly_set_args
+# F. explicitly_set_args
 # ---------------------------------------------------------------------------
 
 class TestExplicitlySetArgs:
@@ -576,6 +404,6 @@ class TestExplicitlySetArgs:
         assert "pc_build" not in result
 
     def test_equal_sign_style_parsed(self):
-        with patch.object(sys, "argv", ["prog", "--ceca-payment-rule=vcg"]):
+        with patch.object(sys, "argv", ["prog", "--sealed-feedback-rule=competitive"]):
             result = explicitly_set_args()
-        assert "ceca_payment_rule" in result
+        assert "sealed_feedback_rule" in result

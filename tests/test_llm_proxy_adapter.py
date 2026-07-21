@@ -7,10 +7,6 @@ from auctionlab.llm.proxies import LlmAuctionProxyAdapter, LlmInferredXorProxy
 from auctionlab.proxies.base import ElicitationEvent
 
 
-def price_dict(d: dict) -> callable:
-    return lambda b: d.get(b, 0.0)
-
-
 ITEM_DESCRIPTIONS = {"A": "Item A", "B": "Item B"}
 
 
@@ -89,63 +85,6 @@ def test_demand_at_prices_uses_current_bid_and_counts_demand_queries():
     assert adapter.stats().demand_queries == 1
     # Demand is answered from the cached bid; no extra LLM calls.
     assert len(adapter.proxy.person.client.calls) == 2
-
-
-def test_ceca_step_happy_path_no_llm_call_and_counts_demand_query():
-    adapter = make_adapter(
-        [
-            '{"bundle_value": 10}',
-            '{"bundle_value": 5}',
-        ]
-    )
-
-    response = adapter.ceca_step(
-        prices=price_dict({frozenset({"A"}): 10.0, frozenset({"B"}): 100.0}),
-        current_bundle=frozenset({"A"}),
-        round_idx=0,
-    )
-
-    assert response.satisfied is True
-    assert adapter.stats().demand_queries == 1
-    # current_bid() populates A and B; ceca_step's own belief shortcut
-    # issues no further LLM call when current_bundle is already best.
-    assert len(adapter.proxy.person.client.calls) == 2
-
-
-def test_ceca_step_unsatisfied_triggers_demand_query_and_upserts_atom():
-    adapter = make_adapter(
-        [
-            '{"bundle_value": 10}',
-            '{"bundle_value": 5}',
-            '{"satisfied": false, "preferred_bundle": ["B"]}',
-            '{"bundle_value": 50}',
-        ]
-    )
-    adapter.current_bid()
-    calls_before = len(adapter.proxy.person.client.calls)
-
-    response = adapter.ceca_step(
-        prices=price_dict({}),
-        current_bundle=frozenset(),
-        round_idx=0,
-    )
-
-    assert response.satisfied is False
-    assert response.demanded_bundle == frozenset({"B"})
-    assert response.value == 50.0
-    assert adapter.stats().demand_queries == 1
-    assert len(adapter.proxy.person.client.calls) == calls_before + 2
-    final_bid = adapter.current_bid()
-    assert XorAtomicBid(bundle=frozenset({"B"}), value=50.0) in final_bid.atoms
-
-
-def test_ceca_pruning_query_count_property_forwards_to_proxy():
-    adapter = make_adapter(['{"bundle_value": 10}', '{"bundle_value": 5}'])
-    adapter.current_bid()
-
-    assert adapter.pruning_query_count == 0
-    adapter.proxy.pruning_query_count = 3
-    assert adapter.pruning_query_count == 3
 
 
 def test_refine_sends_value_query_and_updates_bid_and_stats():

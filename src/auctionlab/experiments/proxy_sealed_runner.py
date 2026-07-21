@@ -52,10 +52,17 @@ Feedback rules
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Any
 
 from auctionlab.auctions.sealed_vcg import run_sealed_xor_vcg
 from auctionlab.auction_types import Bundle, Item, validate_bidder_keys
 from auctionlab.bids.xor import XorBid
+from auctionlab.experiments._trajectory_util import (
+    aggregate_query_counts,
+    logger_total_tokens,
+    refinement_cap_fields,
+    true_welfare_for_allocation,
+)
 from auctionlab.experiments.runner import MechanismResult
 from auctionlab.instances.base import AuctionInstance
 from auctionlab.proxies.base import (
@@ -81,12 +88,25 @@ MECHANISM_NAME = "proxy_sealed_vcg"
 
 @dataclass(frozen=True)
 class ProxySealedConfig:
-    """Configuration for the proxy-mediated sealed elicitation phase."""
+    """Configuration for the proxy-mediated sealed elicitation phase.
+
+    ``max_refinements_per_bidder`` and ``max_total_refinements`` are safety
+    caps, not tuning targets: refinement count should be an outcome of the
+    elicitation events and mechanism (feedback rule, elicitation rounds), not
+    a lever used to shape results. Both default to 0 (unlimited) and should
+    normally be left high enough that they never bind in main experiments --
+    see ``docs/parameter_tuning_methodology.md``. Bidder/bundle value queries
+    are already deduplicated (a bundle is refined at most once per proxy;
+    see ``LlmInferredXorProxy``/``LlmAuctionProxyAdapter``), so these caps
+    only guard against runaway query volume, not repeat queries.
+    """
 
     elicitation_rounds: int = 0
     feedback_rule: str = "none"
     # Cap on refinement queries per bidder. 0 means unlimited.
     max_refinements_per_bidder: int = 0
+    # Cap on refinement queries summed across all bidders. 0 means unlimited.
+    max_total_refinements: int = 0
 
     def __post_init__(self) -> None:
         if self.elicitation_rounds < 0:
@@ -98,6 +118,8 @@ class ProxySealedConfig:
             )
         if self.max_refinements_per_bidder < 0:
             raise ValueError("max_refinements_per_bidder must be non-negative")
+        if self.max_total_refinements < 0:
+            raise ValueError("max_total_refinements must be non-negative")
 
 
 def _best_positive_value_bundle(bid: XorBid) -> Bundle | None:
@@ -295,18 +317,56 @@ def _provisional_events(
     return events
 
 
-def run_proxy_sealed_vcg_experiment(
+def _proxy_stats_snapshot(
+    proxies_by_bidder: dict[str, SealedAuctionProxy],
+) -> dict[str, dict[str, int]]:
+    """Per-bidder cumulative query counters, copied out of the live ``ProxyStats``."""
+    snapshot: dict[str, dict[str, int]] = {}
+    for bidder_id, proxy in proxies_by_bidder.items():
+        stats = proxy.stats()
+        snapshot[bidder_id] = {
+            "value_queries": stats.value_queries,
+            "demand_queries": stats.demand_queries,
+            "nl_queries": stats.nl_queries,
+            "refinement_queries": stats.refinement_queries,
+        }
+    return snapshot
+
+
+def run_proxy_sealed_vcg_trajectory(
     instance: AuctionInstance,
     proxies: list[SealedAuctionProxy],
     config: ProxySealedConfig,
-) -> MechanismResult:
-    """Run a proxy-mediated sealed XOR VCG experiment.
+    *,
+    logger: Any | None = None,
+) -> list[MechanismResult]:
+    """Run a proxy-mediated sealed XOR VCG experiment, recording every round.
 
-    With ``config.elicitation_rounds == 0`` this reproduces the static
-    sealed-proxy baseline: each proxy's initial ``submit_bid()`` is used
-    directly. With ``elicitation_rounds > 0``, proxies are given a chance to
-    refine their bids in response to provisional-allocation feedback before
-    the final auction is run.
+    Returns one :class:`MechanismResult` per round, index 0..``config.elicitation_rounds``:
+
+    - round 0 is each proxy's initial bid (after any shared NL/interest-map/
+      provisional-valuation initialisation the caller already performed),
+      before any sealed feedback/refinement.
+    - round r (1..R) is the allocation/result after r sealed
+      feedback/refinement cycles.
+
+    Proxy state (and therefore ``proxies``) is never reset between rounds:
+    the same proxy objects accumulate refinements across the whole
+    trajectory. ``run_proxy_sealed_vcg_experiment`` is the special case that
+    returns only the final round, kept for backward compatibility.
+
+    ``logger``, if given (an :class:`~auctionlab.llm.logging.LlmCallLogger`),
+    is used to attribute LLM token usage and query counts to each round.
+    Token usage is read via ``total_tokens()`` (unaffected by ``mark()``).
+    Value/demand/nl query *counts* are read via ``stats_since_mark()``,
+    bucketed by prompt type exactly like
+    :func:`auctionlab.experiments.run_config.collect_arm_stats` -- that is
+    the canonical source for the query counts already shown in the CLI's
+    final per-arm summary (including refinement- and ground-truth-triggered
+    queries, which ``ProxyStats.value_queries`` alone does not capture; see
+    :mod:`auctionlab.experiments._trajectory_util`). Without a logger (e.g.
+    toy/scripted proxies in tests), falls back to summing ``ProxyStats``
+    fields across bidders.
     """
     proxies_by_bidder = {proxy.bidder_id: proxy for proxy in proxies}
     validate_bidder_keys(
@@ -320,107 +380,206 @@ def run_proxy_sealed_vcg_experiment(
         for bidder_id in instance.bidder_ids
     }
 
-    refinement_query_count_by_bidder = {
-        bidder_id: 0 for bidder_id in instance.bidder_ids
-    }
-
-    if config.elicitation_rounds > 0:
-        for round_idx in range(config.elicitation_rounds):
-            bids_by_bidder: dict[str, XorBid] = {
-                bidder_id: proxies_by_bidder[bidder_id].current_bid()
-                for bidder_id in instance.bidder_ids
-            }
-
-            provisional = solve_wdp_xor_ilp(
-                instance.items,
-                [bids_by_bidder[bidder_id] for bidder_id in instance.bidder_ids],
-            )
-
-            print(
-                f"\n  ── sealed round {round_idx + 1}/{config.elicitation_rounds}"
-                f"  welfare {provisional.welfare:.0f}",
-                flush=True,
-            )
-            for bidder_id in instance.bidder_ids:
-                alloc = provisional.allocation.get(bidder_id, frozenset())
-                if alloc:
-                    bundle_str = "{" + ", ".join(sorted(alloc)) + "}"
-                    print(f"    {bidder_id:<14}  →  {bundle_str}", flush=True)
-
-            events = _provisional_events(
-                instance=instance,
-                bids_by_bidder=bids_by_bidder,
-                provisional=provisional,
-                feedback_rule=config.feedback_rule,
-                round_idx=round_idx,
-            )
-
-            for event in events:
-                bidder_id = event.bidder_id
-                if (
-                    config.max_refinements_per_bidder > 0
-                    and refinement_query_count_by_bidder[bidder_id]
-                    >= config.max_refinements_per_bidder
-                ):
-                    continue
-
-                bundle_str = (
-                    "{" + ",".join(sorted(event.bundle)) + "}"
-                    if event.bundle
-                    else "∅"
-                )
-                print(
-                    f"  {bidder_id:<12}  {event.event_type}  {bundle_str}",
-                    flush=True,
-                )
-
-                proxies_by_bidder[bidder_id].receive_provisional_feedback(event)
-                refinement_query_count_by_bidder[bidder_id] = (
-                    proxies_by_bidder[bidder_id].stats().refinement_queries
-                )
-
-    final_bids: dict[str, XorBid] = {
-        bidder_id: proxies_by_bidder[bidder_id].submit_bid()
+    prev_stats = {
+        bidder_id: {
+            "value_queries": 0,
+            "demand_queries": 0,
+            "nl_queries": 0,
+            "refinement_queries": 0,
+        }
         for bidder_id in instance.bidder_ids
     }
+    prev_tok_in, prev_tok_out = logger_total_tokens(logger)
+    cumulative_tokens_in = 0
+    cumulative_tokens_out = 0
+    prev_vq, prev_dq, prev_nl = 0, 0, 0
 
-    refinement_records_by_bidder: dict[str, list[RefinementRecord]] = {
-        bidder_id: list(
-            getattr(proxy, "refinement_records", lambda: [])()
-        )
-        for bidder_id, proxy in proxies_by_bidder.items()
-    }
+    def _record_round(round_idx: int) -> MechanismResult:
+        nonlocal prev_stats, prev_tok_in, prev_tok_out
+        nonlocal cumulative_tokens_in, cumulative_tokens_out
+        nonlocal prev_vq, prev_dq, prev_nl
 
-    outcome = run_sealed_xor_vcg(
-        items=instance.items,
-        bids=[final_bids[bidder_id] for bidder_id in instance.bidder_ids],
-    )
-
-    if config.elicitation_rounds == 0:
-        mechanism = f"{MECHANISM_NAME}_static"
-    else:
-        mechanism = (
-            f"{MECHANISM_NAME}_elicited_{config.feedback_rule}_"
-            f"{config.elicitation_rounds}"
+        bids_now: dict[str, XorBid] = {
+            bidder_id: clone_xor_bid(proxies_by_bidder[bidder_id].submit_bid())
+            for bidder_id in instance.bidder_ids
+        }
+        outcome = run_sealed_xor_vcg(
+            items=instance.items,
+            bids=[bids_now[bidder_id] for bidder_id in instance.bidder_ids],
         )
 
-    return MechanismResult(
-        mechanism=mechanism,
-        allocation=outcome.allocation,
-        welfare=outcome.welfare,
-        payments=outcome.payments,
-        revenue=sum(outcome.payments.values()),
-        rounds=config.elicitation_rounds or None,
-        query_count=sum(refinement_query_count_by_bidder.values()),
-        metadata={
-            "elicitation_rounds": config.elicitation_rounds,
-            "feedback_rule": config.feedback_rule,
-            "max_refinements_per_bidder": config.max_refinements_per_bidder,
-            "refinement_query_count_by_bidder": (
-                refinement_query_count_by_bidder
-            ),
-            "initial_bids": initial_bids,
-            "final_bids": final_bids,
-            "refinement_records_by_bidder": refinement_records_by_bidder,
-        },
-    )
+        stats_now = _proxy_stats_snapshot(proxies_by_bidder)
+        new_by_bidder = {
+            bidder_id: {
+                key: stats_now[bidder_id][key] - prev_stats[bidder_id][key]
+                for key in stats_now[bidder_id]
+            }
+            for bidder_id in instance.bidder_ids
+        }
+
+        tok_in_total, tok_out_total = logger_total_tokens(logger)
+        new_tok_in = tok_in_total - prev_tok_in
+        new_tok_out = tok_out_total - prev_tok_out
+        cumulative_tokens_in += new_tok_in
+        cumulative_tokens_out += new_tok_out
+        prev_tok_in, prev_tok_out = tok_in_total, tok_out_total
+
+        cum_vq, cum_dq, cum_nl = aggregate_query_counts(logger, stats_now)
+        new_vq = cum_vq - prev_vq
+        new_dq = cum_dq - prev_dq
+        new_nl = cum_nl - prev_nl
+        prev_vq, prev_dq, prev_nl = cum_vq, cum_dq, cum_nl
+
+        refinement_query_count_by_bidder = {
+            bidder_id: stats_now[bidder_id]["refinement_queries"]
+            for bidder_id in instance.bidder_ids
+        }
+        refinement_records_by_bidder: dict[str, list[RefinementRecord]] = {
+            bidder_id: list(
+                getattr(proxy, "refinement_records", lambda: [])()
+            )
+            for bidder_id, proxy in proxies_by_bidder.items()
+        }
+        cap_fields = refinement_cap_fields(
+            refinement_query_count_by_bidder,
+            max_refinements_per_bidder=config.max_refinements_per_bidder,
+            max_total_refinements=config.max_total_refinements,
+        )
+
+        if round_idx == 0:
+            mechanism = f"{MECHANISM_NAME}_static"
+        else:
+            mechanism = (
+                f"{MECHANISM_NAME}_elicited_{config.feedback_rule}_{round_idx}"
+            )
+
+        result = MechanismResult(
+            mechanism=mechanism,
+            allocation=outcome.allocation,
+            welfare=outcome.welfare,
+            payments=outcome.payments,
+            revenue=sum(outcome.payments.values()),
+            rounds=round_idx or None,
+            query_count=sum(refinement_query_count_by_bidder.values()),
+            metadata={
+                "elicitation_rounds": round_idx,
+                "feedback_rule": config.feedback_rule,
+                "max_refinements_per_bidder": config.max_refinements_per_bidder,
+                "max_total_refinements": config.max_total_refinements,
+                "refinement_query_count_by_bidder": (
+                    refinement_query_count_by_bidder
+                ),
+                **cap_fields,
+                "new_refinement_query_count_by_bidder": {
+                    bidder_id: new_by_bidder[bidder_id]["refinement_queries"]
+                    for bidder_id in instance.bidder_ids
+                },
+                "cumulative_value_queries": cum_vq,
+                "new_value_queries": new_vq,
+                "cumulative_demand_queries": cum_dq,
+                "new_demand_queries": new_dq,
+                "cumulative_nl_queries": cum_nl,
+                "new_nl_queries": new_nl,
+                "tokens_in": cumulative_tokens_in,
+                "tokens_out": cumulative_tokens_out,
+                "new_tokens_in": new_tok_in,
+                "new_tokens_out": new_tok_out,
+                "initial_bids": initial_bids,
+                "final_bids": bids_now,
+                "refinement_records_by_bidder": refinement_records_by_bidder,
+            },
+        )
+
+        prev_stats = stats_now
+        return result
+
+    trajectory = [_record_round(0)]
+
+    for round_number in range(1, config.elicitation_rounds + 1):
+        bids_by_bidder: dict[str, XorBid] = {
+            bidder_id: proxies_by_bidder[bidder_id].current_bid()
+            for bidder_id in instance.bidder_ids
+        }
+
+        provisional = solve_wdp_xor_ilp(
+            instance.items,
+            [bids_by_bidder[bidder_id] for bidder_id in instance.bidder_ids],
+        )
+        # provisional.welfare is the WDP objective over bidders' current
+        # REPORTED bids -- it is not ground-truth welfare, and can overstate
+        # it when a proxy's reported bid is miscalibrated. Always print both
+        # so the two are never conflated (matches the reported/true
+        # convention used everywhere else in the CLI's summaries).
+        provisional_true_welfare = true_welfare_for_allocation(
+            instance, provisional.allocation
+        )
+
+        print(
+            f"\n  ── sealed round {round_number}/{config.elicitation_rounds}"
+            f"  reported welfare {provisional.welfare:.0f}"
+            f"  true welfare {provisional_true_welfare:.0f}",
+            flush=True,
+        )
+        for bidder_id in instance.bidder_ids:
+            alloc = provisional.allocation.get(bidder_id, frozenset())
+            if alloc:
+                bundle_str = "{" + ", ".join(sorted(alloc)) + "}"
+                print(f"    {bidder_id:<14}  →  {bundle_str}", flush=True)
+
+        events = _provisional_events(
+            instance=instance,
+            bids_by_bidder=bids_by_bidder,
+            provisional=provisional,
+            feedback_rule=config.feedback_rule,
+            round_idx=round_number - 1,
+        )
+
+        for event in events:
+            bidder_id = event.bidder_id
+            if (
+                config.max_refinements_per_bidder > 0
+                and proxies_by_bidder[bidder_id].stats().refinement_queries
+                >= config.max_refinements_per_bidder
+            ):
+                continue
+            if config.max_total_refinements > 0 and (
+                sum(
+                    p.stats().refinement_queries
+                    for p in proxies_by_bidder.values()
+                )
+                >= config.max_total_refinements
+            ):
+                continue
+
+            bundle_str = (
+                "{" + ",".join(sorted(event.bundle)) + "}"
+                if event.bundle
+                else "∅"
+            )
+            print(
+                f"  {bidder_id:<12}  {event.event_type}  {bundle_str}",
+                flush=True,
+            )
+
+            proxies_by_bidder[bidder_id].receive_provisional_feedback(event)
+
+        trajectory.append(_record_round(round_number))
+
+    return trajectory
+
+
+def run_proxy_sealed_vcg_experiment(
+    instance: AuctionInstance,
+    proxies: list[SealedAuctionProxy],
+    config: ProxySealedConfig,
+) -> MechanismResult:
+    """Run a proxy-mediated sealed XOR VCG experiment, returning the final round.
+
+    With ``config.elicitation_rounds == 0`` this reproduces the static
+    sealed-proxy baseline: each proxy's initial ``submit_bid()`` is used
+    directly. With ``elicitation_rounds > 0``, proxies are given a chance to
+    refine their bids in response to provisional-allocation feedback before
+    the final auction is run. See :func:`run_proxy_sealed_vcg_trajectory` for
+    the full per-round trajectory.
+    """
+    return run_proxy_sealed_vcg_trajectory(instance, proxies, config)[-1]

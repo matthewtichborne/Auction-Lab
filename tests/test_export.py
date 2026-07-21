@@ -8,6 +8,7 @@ from auctionlab.experiments.export import (
     batch_results_to_comparison_rows,
     batch_results_to_mechanism_rows,
     write_csv,
+    write_csv_variable_rows,
 )
 from auctionlab.experiments.runner import run_batch_experiments
 from auctionlab.instances.random import make_random_xor_instance
@@ -95,6 +96,33 @@ def test_write_csv_writes_file(tmp_path):
         {"a": "1", "b": "x"},
         {"a": "2", "b": "y"},
     ]
+
+
+def test_write_csv_variable_rows_unions_fieldnames(tmp_path):
+    rows = [
+        {"scenario": "s1", "arm": "shared initial", "tok_in": 10},
+        {"scenario": "s1", "arm": "sealed", "efficiency": 0.9, "revenue": 5},
+    ]
+    output_path = tmp_path / "summary.csv"
+
+    write_csv_variable_rows(rows, output_path)
+
+    with output_path.open(newline="") as f:
+        reader = csv.DictReader(f)
+        assert reader.fieldnames == ["scenario", "arm", "tok_in", "efficiency", "revenue"]
+        loaded = list(reader)
+
+    assert loaded == [
+        {"scenario": "s1", "arm": "shared initial", "tok_in": "10", "efficiency": "", "revenue": ""},
+        {"scenario": "s1", "arm": "sealed", "tok_in": "", "efficiency": "0.9", "revenue": "5"},
+    ]
+
+
+def test_write_csv_variable_rows_empty_writes_empty_file(tmp_path):
+    output_path = tmp_path / "empty.csv"
+    write_csv_variable_rows([], output_path)
+    assert output_path.read_text() == ""
+
 
 def test_comparison_rows_include_diagnostics_when_instances_provided():
     instances = []

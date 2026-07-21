@@ -8,6 +8,10 @@ from typing import Any
 from auctionlab.auction_types import Bundle
 from auctionlab.auctions.clock import ClockConfig
 from auctionlab.bids.xor import XorBid
+from auctionlab.experiments._trajectory_util import (
+    refinement_cap_fields,
+    true_welfare_for_allocation,
+)
 from auctionlab.experiments.export import allocation_to_str
 from auctionlab.experiments.llm_runner import (
     run_clock_llm_proxy_experiment,
@@ -42,22 +46,6 @@ class LlmClockComparisonResult:
     full_info: MechanismResult
     clock_llm_proxy: MechanismResult
     clock_llm_true_welfare: float
-
-
-def true_welfare_for_allocation(
-    instance: AuctionInstance,
-    allocation: dict[str, Bundle],
-) -> float:
-    """Evaluate any reported allocation against benchmark instance values."""
-    return float(
-        sum(
-            instance.value_of(
-                bidder_id,
-                allocation.get(bidder_id, frozenset()),
-            )
-            for bidder_id in instance.bidder_ids
-        )
-    )
 
 
 def allocation_matches(
@@ -148,6 +136,37 @@ def run_sealed_llm_comparison(
             llm_proxy.allocation,
         ),
     )
+
+
+def bidder_counts_to_str(counts_by_bidder: dict[str, int]) -> str:
+    return ";".join(
+        f"{bidder_id}:{count}"
+        for bidder_id, count in sorted(counts_by_bidder.items())
+    )
+
+
+def refinement_cap_row_fields(
+    refinement_query_count_by_bidder: dict[str, int],
+    *,
+    max_refinements_per_bidder: int = 0,
+    max_total_refinements: int = 0,
+) -> dict[str, Any]:
+    """CSV-row-friendly wrapper around :func:`refinement_cap_fields`.
+
+    Identical scalar fields, but ``per_bidder_refinement_queries`` is a
+    ``bidder:count;...`` string (matching this module's other bidder-keyed
+    columns) instead of a raw dict, so it round-trips cleanly through
+    ``csv.DictWriter``.
+    """
+    fields = refinement_cap_fields(
+        refinement_query_count_by_bidder,
+        max_refinements_per_bidder=max_refinements_per_bidder,
+        max_total_refinements=max_total_refinements,
+    )
+    fields["per_bidder_refinement_queries"] = bidder_counts_to_str(
+        fields["per_bidder_refinement_queries"]
+    )
+    return fields
 
 
 def epsilon_by_bidder_to_str(epsilon_by_bidder: dict[str, float]) -> str:
@@ -314,6 +333,12 @@ def clock_llm_comparison_to_row(
                 ].items()
             )
         ),
+        **refinement_cap_row_fields(
+            clock_llm.metadata["refinement_query_count_by_bidder"],
+            max_refinements_per_bidder=clock_llm.metadata[
+                "max_refinement_queries_per_bidder"
+            ],
+        ),
         "discount_inferred": clock_llm.metadata["discount_inferred"],
         "epsilon_by_bidder": epsilon_by_bidder_to_str(
             clock_llm.metadata["epsilon_by_bidder"]
@@ -397,11 +422,21 @@ def proxy_sealed_result_to_row(
         "max_refinements_per_bidder": result.metadata[
             "max_refinements_per_bidder"
         ],
+        "max_total_refinements": result.metadata.get("max_total_refinements", 0),
         "refinement_query_count_by_bidder": ";".join(
             f"{bidder_id}:{count}"
             for bidder_id, count in sorted(
                 result.metadata["refinement_query_count_by_bidder"].items()
             )
+        ),
+        **refinement_cap_row_fields(
+            result.metadata["refinement_query_count_by_bidder"],
+            max_refinements_per_bidder=result.metadata[
+                "max_refinements_per_bidder"
+            ],
+            max_total_refinements=result.metadata.get(
+                "max_total_refinements", 0
+            ),
         ),
         "initial_bids": reported_bids_to_str(result.metadata["initial_bids"]),
         "final_bids": reported_bids_to_str(result.metadata["final_bids"]),
@@ -415,6 +450,107 @@ def proxy_sealed_result_to_row(
             result.metadata["refinement_records_by_bidder"]
         ),
     }
+
+
+def proxy_sealed_trajectory_to_rows(
+    *,
+    scenario_name: str,
+    scenario_seed: Any,
+    num_goods: int,
+    num_bidders: int,
+    instance: AuctionInstance,
+    trajectory: list[MechanismResult],
+    comparison_welfare: float | None = None,
+    welfare_tolerance: float = 1e-6,
+) -> list[dict[str, Any]]:
+    """Serialize a :func:`run_proxy_sealed_vcg_trajectory` result to CSV rows.
+
+    One row per round (0..R). ``comparison_welfare``, if given, is another
+    mechanism's true welfare on the same instance (e.g. the plain sealed LLM
+    comparison arm); it drives ``mechanism_relative_efficiency``. Without it,
+    that column is left blank.
+    """
+    full_info = run_sealed_vcg_experiment(instance)
+
+    rows: list[dict[str, Any]] = []
+    prev_true_welfare: float | None = None
+    prev_allocation: dict[str, Bundle] | None = None
+
+    for result in trajectory:
+        true_welfare = true_welfare_for_allocation(instance, result.allocation)
+
+        if full_info.welfare > welfare_tolerance:
+            global_efficiency = true_welfare / full_info.welfare
+        else:
+            global_efficiency = 1.0
+
+        mechanism_relative_efficiency: float | str = ""
+        if comparison_welfare is not None and comparison_welfare > welfare_tolerance:
+            mechanism_relative_efficiency = true_welfare / comparison_welfare
+
+        allocation_changed = (
+            False
+            if prev_allocation is None
+            else not allocation_matches(result.allocation, prev_allocation)
+        )
+        welfare_delta = (
+            0.0 if prev_true_welfare is None else true_welfare - prev_true_welfare
+        )
+
+        rows.append({
+            "scenario": scenario_name,
+            "scenario_seed": scenario_seed,
+            "num_goods": num_goods,
+            "num_bidders": num_bidders,
+            "feedback_rule": result.metadata["feedback_rule"],
+            "max_refinement_queries_per_bidder": result.metadata[
+                "max_refinements_per_bidder"
+            ],
+            "round": result.metadata["elicitation_rounds"],
+            "true_welfare": true_welfare,
+            "reported_welfare": result.welfare,
+            "full_info_welfare": full_info.welfare,
+            "global_efficiency": global_efficiency,
+            "mechanism_relative_efficiency": mechanism_relative_efficiency,
+            "revenue": result.revenue,
+            "true_surplus": true_welfare - result.revenue,
+            "allocation_repr": allocation_to_str(result.allocation),
+            "allocation_changed_from_previous_round": allocation_changed,
+            "welfare_delta_from_previous_round": welfare_delta,
+            "new_value_queries": result.metadata["new_value_queries"],
+            "cumulative_value_queries": result.metadata["cumulative_value_queries"],
+            "new_demand_queries": result.metadata["new_demand_queries"],
+            "cumulative_demand_queries": result.metadata["cumulative_demand_queries"],
+            "new_nl_queries": result.metadata["new_nl_queries"],
+            "cumulative_nl_queries": result.metadata["cumulative_nl_queries"],
+            "new_tokens_in": result.metadata["new_tokens_in"],
+            "cumulative_tokens_in": result.metadata["tokens_in"],
+            "new_tokens_out": result.metadata["new_tokens_out"],
+            "cumulative_tokens_out": result.metadata["tokens_out"],
+            "num_refinements_this_round": sum(
+                result.metadata["new_refinement_query_count_by_bidder"].values()
+            ),
+            "cumulative_refinements": sum(
+                result.metadata["refinement_query_count_by_bidder"].values()
+            ),
+            "max_total_refinements": result.metadata.get(
+                "max_total_refinements", 0
+            ),
+            **refinement_cap_row_fields(
+                result.metadata["refinement_query_count_by_bidder"],
+                max_refinements_per_bidder=result.metadata[
+                    "max_refinements_per_bidder"
+                ],
+                max_total_refinements=result.metadata.get(
+                    "max_total_refinements", 0
+                ),
+            ),
+        })
+
+        prev_true_welfare = true_welfare
+        prev_allocation = result.allocation
+
+    return rows
 
 
 def proxy_clock_result_to_row(
@@ -459,11 +595,21 @@ def proxy_clock_result_to_row(
         "max_refinements_per_bidder": result.metadata[
             "max_refinements_per_bidder"
         ],
+        "max_total_refinements": result.metadata.get("max_total_refinements", 0),
         "refinement_query_count_by_bidder": ";".join(
             f"{bidder_id}:{count}"
             for bidder_id, count in sorted(
                 result.metadata["refinement_query_count_by_bidder"].items()
             )
+        ),
+        **refinement_cap_row_fields(
+            result.metadata["refinement_query_count_by_bidder"],
+            max_refinements_per_bidder=result.metadata[
+                "max_refinements_per_bidder"
+            ],
+            max_total_refinements=result.metadata.get(
+                "max_total_refinements", 0
+            ),
         ),
         "initial_bids": reported_bids_to_str(result.metadata["initial_bids"]),
         "final_bids": reported_bids_to_str(result.metadata["final_bids"]),
@@ -477,246 +623,37 @@ def proxy_clock_result_to_row(
             result.metadata["refinement_records_by_bidder"]
         ),
         "final_prices": result.metadata["final_prices"],
+        "supplementary_atoms_total": result.metadata.get("supplementary_atoms", ""),
+        "failure_classification": result.metadata.get("failure_classification", ""),
+        # Best-vs-final round diagnostics (only populated for trajectory
+        # runs -- see run_proxy_clock_trajectory._compute_best_final_round_diagnostics).
+        "final_round": result.metadata.get("final_round", ""),
+        "termination_reason": result.metadata.get("termination_reason", ""),
+        "final_true_welfare": result.metadata.get("final_true_welfare", ""),
+        "final_reported_welfare": result.metadata.get("final_reported_welfare", ""),
+        "final_true_efficiency": result.metadata.get("final_true_efficiency", ""),
+        "final_true_surplus": result.metadata.get("final_true_surplus", ""),
+        "final_revenue": result.metadata.get("final_revenue", ""),
+        "best_round": result.metadata.get("best_round", ""),
+        "best_true_welfare": result.metadata.get("best_true_welfare", ""),
+        "best_true_efficiency": result.metadata.get("best_true_efficiency", ""),
+        "best_reported_welfare_at_best_round": result.metadata.get(
+            "best_reported_welfare_at_best_round", ""
+        ),
+        "best_true_surplus_at_best_round": result.metadata.get(
+            "best_true_surplus_at_best_round", ""
+        ),
+        "cumulative_value_queries_at_best_round": result.metadata.get(
+            "cumulative_value_queries_at_best_round", ""
+        ),
+        "final_round_events": result.metadata.get("final_round_events", ""),
+        "final_round_demand_changed_events": result.metadata.get(
+            "final_round_demand_changed_events", ""
+        ),
+        "final_round_refinements": result.metadata.get("final_round_refinements", ""),
+        "final_welfare_minus_best_welfare": result.metadata.get(
+            "final_welfare_minus_best_welfare", ""
+        ),
     }
 
 
-def ceca_result_to_row(
-    *,
-    instance_name: str,
-    instance: AuctionInstance,
-    result: MechanismResult,
-    welfare_tolerance: float = 1e-6,
-) -> dict[str, Any]:
-    """Serialize a :class:`MechanismResult` from ``run_proxy_ceca_experiment``.
-
-    Not generic over ``proxy_sealed_result_to_row``/``proxy_clock_result_to_row``
-    despite the shared shape -- CECA's metadata keys (``payment_rule``,
-    ``converged``, ``stage1_welfare``/``stage2_welfare``,
-    ``pruning_query_count_by_bidder``) have no sealed/clock analogue, and
-    CECA tracks no ``refinement_records_by_bidder`` (every round *is* an
-    elicitation step; there's no separate refinement-event layer).
-    """
-    full_info = run_sealed_vcg_experiment(instance)
-    true_welfare = true_welfare_for_allocation(instance, result.allocation)
-
-    if full_info.welfare > welfare_tolerance:
-        efficiency = true_welfare / full_info.welfare
-    else:
-        efficiency = 1.0
-
-    reported_welfare = result.welfare  # WDP objective = sum of reported values for winners
-    welfare_understatement = reported_welfare - true_welfare
-    reported_true_ratio = (
-        true_welfare / reported_welfare
-        if abs(reported_welfare) > welfare_tolerance
-        else (1.0 if abs(true_welfare) <= welfare_tolerance else float("nan"))
-    )
-    revenue = result.revenue
-    true_surplus = true_welfare - revenue
-
-    return {
-        "instance_name": instance_name,
-        "mechanism": result.mechanism,
-        "ceca_initial_bid_mode": result.metadata.get("ceca_initial_bid_mode", "full_proxy"),
-        "ceca_variant": result.metadata.get("ceca_variant", "prior"),
-        "full_info_welfare": full_info.welfare,
-        "proxy_reported_welfare": reported_welfare,
-        "reported_allocated_welfare": reported_welfare,
-        "proxy_true_welfare": true_welfare,
-        "true_allocated_welfare": true_welfare,
-        "reported_true_welfare_ratio": reported_true_ratio,
-        "welfare_understatement_or_overstatement": welfare_understatement,
-        "efficiency": efficiency,
-        "full_info_revenue": full_info.revenue,
-        "proxy_revenue": revenue,
-        "true_surplus": true_surplus,
-        "negative_true_surplus": true_surplus < -welfare_tolerance,
-        "rounds": result.rounds if result.rounds is not None else "",
-        "allocation_match": allocation_matches(
-            full_info.allocation,
-            result.allocation,
-        ),
-        "welfare_match": (
-            abs(full_info.welfare - true_welfare) <= welfare_tolerance
-        ),
-        "full_info_allocation": allocation_to_str(full_info.allocation),
-        "proxy_allocation": allocation_to_str(result.allocation),
-        "payment_rule": result.metadata["payment_rule"],
-        "ceca_internal_price_rule": result.metadata.get(
-            "ceca_internal_price_rule", "lindahl_manifest"
-        ),
-        "converged": result.metadata["converged"],
-        "ceca_rounds": result.metadata.get("ceca_rounds", result.rounds or ""),
-        "stage1_welfare": result.metadata["stage1_welfare"],
-        "stage2_welfare": result.metadata["stage2_welfare"],
-        "initial_manifest_total_atoms": result.metadata.get(
-            "initial_manifest_total_atoms", ""
-        ),
-        "final_manifest_total_atoms": result.metadata.get(
-            "final_manifest_total_atoms", ""
-        ),
-        "manifest_growth_total": result.metadata.get("manifest_growth_total", ""),
-        "manifest_growth_by_bidder": ";".join(
-            f"{b}:{g}"
-            for b, g in sorted(
-                result.metadata.get("manifest_growth_by_bidder", {}).items()
-            )
-        ),
-        "demanded_bundle_count_by_bidder": ";".join(
-            f"{b}:{c}"
-            for b, c in sorted(
-                result.metadata.get("demanded_bundle_count_by_bidder", {}).items()
-            )
-        ),
-        "unique_demanded_bundle_count_by_bidder": ";".join(
-            f"{b}:{c}"
-            for b, c in sorted(
-                result.metadata.get("unique_demanded_bundle_count_by_bidder", {}).items()
-            )
-        ),
-        "duplicate_demand_count_by_bidder": ";".join(
-            f"{b}:{c}"
-            for b, c in sorted(
-                result.metadata.get("duplicate_demand_count_by_bidder", {}).items()
-            )
-        ),
-        "unchanged_demand_count_by_bidder": ";".join(
-            f"{b}:{c}"
-            for b, c in sorted(
-                result.metadata.get("unchanged_demand_count_by_bidder", {}).items()
-            )
-        ),
-        "demand_query_count_by_bidder": ";".join(
-            f"{bidder_id}:{count}"
-            for bidder_id, count in sorted(
-                result.metadata["demand_query_count_by_bidder"].items()
-            )
-        ),
-        "pruning_query_count_by_bidder": ";".join(
-            f"{bidder_id}:{count}"
-            for bidder_id, count in sorted(
-                result.metadata["pruning_query_count_by_bidder"].items()
-            )
-        ),
-        "final_manifest_sizes": ";".join(
-            f"{bidder_id}:{count}"
-            for bidder_id, count in sorted(
-                result.metadata["final_manifest_sizes"].items()
-            )
-        ),
-        "initial_manifest_sizes": ";".join(
-            f"{bidder_id}:{count}"
-            for bidder_id, count in sorted(
-                result.metadata.get("initial_manifest_sizes", {}).items()
-            )
-        ),
-        "initial_bids": reported_bids_to_str(result.metadata["initial_bids"]),
-        "final_bids": reported_bids_to_str(result.metadata["final_bids"]),
-        "proxy_architecture": result.metadata.get("proxy_architecture", "unknown"),
-        "ceca_atomic_trimming": result.metadata.get("ceca_atomic_trimming", True),
-        "ceca_trim_value_tolerance": result.metadata.get("ceca_trim_value_tolerance", 0.0),
-        "ceca_trimmed_demand_count": result.metadata.get("ceca_trimmed_demand_count", 0),
-        "ceca_total_trim_items_removed": result.metadata.get("ceca_total_trim_items_removed", 0),
-        "ceca_total_trim_value_queries": result.metadata.get("ceca_total_trim_value_queries", 0),
-        "ceca_avg_raw_demand_size": result.metadata.get("ceca_avg_raw_demand_size", 0.0),
-        "ceca_avg_trimmed_atom_size": result.metadata.get("ceca_avg_trimmed_atom_size", 0.0),
-        "ceca_repeated_raw_demand_count": result.metadata.get("ceca_repeated_raw_demand_count", 0),
-        "ceca_repeated_trimmed_atom_count": result.metadata.get("ceca_repeated_trimmed_atom_count", 0),
-        # Feature 3: stopped reason (explicit field, not buried in converged bool).
-        "stopped_reason": result.metadata.get("stopped_reason", "max_rounds"),
-        # Feature 2: no-new-information diagnostics.
-        "total_no_new_information": result.metadata.get("total_no_new_information", 0),
-        "no_new_information_count_by_bidder": ";".join(
-            f"{b}:{c}"
-            for b, c in sorted(
-                result.metadata.get("no_new_information_count_by_bidder", {}).items()
-            )
-        ),
-        "total_useful_counterexamples": result.metadata.get("total_useful_counterexamples", ""),
-        "useful_counterexample_count_by_bidder": ";".join(
-            f"{b}:{c}"
-            for b, c in sorted(
-                result.metadata.get("useful_counterexample_count_by_bidder", {}).items()
-            )
-        ),
-        # Feature 1: corrected trim diagnostics.
-        "num_demands_trimmed_to_smaller_atom": result.metadata.get(
-            "num_demands_trimmed_to_smaller_atom", 0
-        ),
-        "total_raw_demand_items": result.metadata.get("total_raw_demand_items", 0),
-        "total_inserted_atom_items": result.metadata.get("total_inserted_atom_items", 0),
-        "total_net_items_removed": result.metadata.get("total_net_items_removed", 0),
-        "avg_raw_demand_size": result.metadata.get("avg_raw_demand_size", 0.0),
-        "avg_inserted_atom_size": result.metadata.get("avg_inserted_atom_size", 0.0),
-        # Tasks 1–2: atom insertion diagnostics.
-        "atom_insertion_count": len(result.metadata.get("atom_insertion_log", [])),
-        "outside_interest_insertion_total": result.metadata.get(
-            "outside_interest_insertion_total", 0
-        ),
-        "outside_interest_insertion_by_bidder": ";".join(
-            f"{b}:{c}"
-            for b, c in sorted(
-                result.metadata.get(
-                    "outside_interest_insertion_count_by_bidder", {}
-                ).items()
-            )
-            if c > 0
-        ),
-        # Task 4: per-round no-info stats.
-        "no_info_round_count": result.metadata.get("no_info_round_count", 0),
-        "bidders_exhausted_by_repetition": ";".join(
-            sorted(result.metadata.get("bidders_exhausted_by_repetition", []))
-        ),
-        # Task 5: bidder exhaustion.
-        "exhaustion_event_count": len(result.metadata.get("exhaustion_events", [])),
-        # Demand universe constraint.
-        "ceca_demand_universe": result.metadata.get("ceca_demand_universe", "all_items"),
-        "out_of_universe_demand_count": result.metadata.get("out_of_universe_demand_count", 0),
-        "rejected_out_of_universe_count": result.metadata.get("rejected_out_of_universe_count", 0),
-        "projected_demand_count": result.metadata.get("projected_demand_count", 0),
-    }
-
-
-def ceca_winner_diagnostics_rows(
-    *,
-    instance_name: str,
-    instance: AuctionInstance,
-    result: MechanismResult,
-) -> list[dict[str, Any]]:
-    """Generate per-winner value and payment diagnostics for a CECA result.
-
-    For each winning bidder, compares the proxy's reported value for the
-    allocated bundle against the bidder's true value, and breaks down
-    payment into true and reported surplus.
-    """
-    rows: list[dict[str, Any]] = []
-    ceca_variant = result.metadata.get("ceca_variant", "prior")
-    ceca_initial_bid_mode = result.metadata.get("ceca_initial_bid_mode", "full_proxy")
-    payment_rule = result.metadata["payment_rule"]
-    final_bids: dict[str, Any] = result.metadata.get("final_bids", {})
-
-    for bidder_id, bundle in sorted(result.allocation.items()):
-        if not bundle:
-            continue
-        reported_value = (
-            final_bids[bidder_id].value_of(bundle)
-            if bidder_id in final_bids
-            else float("nan")
-        )
-        true_value = instance.value_of(bidder_id, bundle)
-        payment = result.payments.get(bidder_id, 0.0)
-        rows.append({
-            "scenario": instance_name,
-            "ceca_variant": ceca_variant,
-            "ceca_initial_bid_mode": ceca_initial_bid_mode,
-            "payment_rule": payment_rule,
-            "bidder_id": bidder_id,
-            "allocated_bundle": "{" + ",".join(sorted(bundle)) + "}",
-            "reported_value": reported_value,
-            "true_value": true_value,
-            "value_error": reported_value - true_value,
-            "payment": payment,
-            "true_surplus": true_value - payment,
-            "reported_surplus": reported_value - payment,
-        })
-    return rows

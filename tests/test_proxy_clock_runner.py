@@ -216,11 +216,81 @@ def test_proxies_must_match_instance_bidder_ids(toy_instance):
         {"margin_threshold": -1.0},
         {"tie_threshold": -1.0},
         {"max_refinements_per_bidder": -1},
+        {"max_total_refinements": -1},
     ],
 )
 def test_invalid_config_rejected(kwargs):
     with pytest.raises(ValueError):
         ProxyClockConfig(**kwargs)
+
+
+def test_max_total_refinements_caps_across_bidders(toy_instance):
+    """A global cap stops firing further refinements once the total is
+    reached, even for a bidder whose own per-bidder count is still zero."""
+    cfg = ClockConfig(max_rounds=20, price_step=1.0, reserve=0.0)
+
+    uncapped_proxies = make_proxies(toy_instance, initial="all_atoms")
+    uncapped_result = run_proxy_clock_experiment(
+        toy_instance,
+        uncapped_proxies,
+        cfg,
+        ProxyClockConfig(
+            top_k=1, elicited=True, margin_threshold=100.0, tie_threshold=100.0
+        ),
+    )
+    uncapped_total = sum(
+        uncapped_result.metadata["refinement_query_count_by_bidder"].values()
+    )
+    assert uncapped_total > 2  # sanity: several bidders refine without a cap
+
+    capped_proxies = make_proxies(toy_instance, initial="all_atoms")
+    capped_result = run_proxy_clock_experiment(
+        toy_instance,
+        capped_proxies,
+        cfg,
+        ProxyClockConfig(
+            top_k=1,
+            elicited=True,
+            margin_threshold=100.0,
+            tie_threshold=100.0,
+            max_total_refinements=2,
+        ),
+    )
+    counts = capped_result.metadata["refinement_query_count_by_bidder"]
+    assert sum(counts.values()) == 2
+    assert capped_result.metadata["total_refinement_queries"] == 2
+    assert capped_result.metadata["safety_cap_hit"] is True
+    assert capped_result.metadata["cap_binding_indicator"] is False
+
+
+def test_refinement_cap_metadata_fields_present_and_unhit_by_default(toy_instance):
+    cfg = ClockConfig(max_rounds=20, price_step=1.0, reserve=0.0)
+    proxies = make_proxies(toy_instance, initial="all_atoms")
+
+    result = run_proxy_clock_experiment(
+        toy_instance,
+        proxies,
+        cfg,
+        ProxyClockConfig(
+            top_k=1, elicited=True, margin_threshold=100.0, tie_threshold=100.0
+        ),
+    )
+
+    counts = result.metadata["refinement_query_count_by_bidder"]
+    assert result.metadata["total_refinement_queries"] == sum(counts.values())
+    assert result.metadata["per_bidder_refinement_queries"] == counts
+    assert result.metadata["cap_binding_indicator"] is False
+    assert result.metadata["safety_cap_hit"] is False
+
+    row = proxy_clock_result_to_row(
+        instance_name="toy",
+        instance=toy_instance,
+        result=result,
+    )
+    assert row["total_refinement_queries"] == sum(counts.values())
+    assert row["cap_binding_indicator"] is False
+    assert row["safety_cap_hit"] is False
+    assert row["max_total_refinements"] == 0
 
 
 class _CapturingProxy(FullInfoAuctionProxy):

@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Dict, List
 
-from auctionlab.auction_types import CecaBidderDiagnostic, Item, Bundle
+from auctionlab.auction_types import Item, Bundle
 from auctionlab.bids.xor import XorBid, XorAtomicBid
 
 
@@ -30,23 +30,6 @@ class DemandResponse:
     primary_bundle: Bundle | None
     supplementary_atoms: List[XorAtomicBid]
     primary_bundles: List[Bundle] = field(default_factory=list)
-
-
-@dataclass(frozen=True)
-class CecaStepResponse:
-    """One bidder's response to a CECA personalized-price demand step.
-
-    ``satisfied=True`` means the bidder is happy with ``current_bundle`` at
-    the offered Lindahl-style bundle prices, ending their participation in
-    this round with no atom update. ``satisfied=False`` carries the
-    bidder's true demanded bundle and its value, which the mechanism folds
-    into that bidder's manifest XOR bid as a new atomic bid.
-    """
-
-    satisfied: bool
-    demanded_bundle: Bundle | None
-    value: float | None
-    diagnostic: CecaBidderDiagnostic | None = None
 
 
 @dataclass(frozen=True)

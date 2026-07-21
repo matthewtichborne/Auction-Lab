@@ -4,10 +4,9 @@ Covers:
   A. Event API basics: construction, unknown-type rejection.
   B. Backward compatibility: old methods still work after handle_event is added.
   C. submit_bid / SUBMIT_BID event produce the same XOR bid.
-  D. clock demand via old method and CLOCK_PRICES event match.
-  E. ceca_step via old method and CECA_SATISFACTION event match.
-  F. Optional interest map: proxy works with interest_map=None.
-  G. Initialisation events on LlmInferredXorProxy.handle_event.
+  D. Clock demand via old method and CLOCK_PRICES event match.
+  E. Optional interest map: proxy works with interest_map=None.
+  F. Initialisation events on LlmInferredXorProxy.handle_event.
 """
 
 from __future__ import annotations
@@ -20,7 +19,6 @@ from auctionlab.llm.person_simulator import LlmPersonSimulator
 from auctionlab.llm.proxies import LlmAuctionProxyAdapter, LlmInferredXorProxy
 from auctionlab.proxies.base import ElicitationEvent
 from auctionlab.proxies.events import (
-    CECA_SATISFACTION,
     CLOCK_PRICES,
     GENERATE_CANDIDATE_BUNDLES,
     INFER_INTEREST_MAP,
@@ -163,18 +161,6 @@ def test_old_demand_at_prices_still_works():
     assert resp.primary_bundle == frozenset({"A"})
 
 
-def test_old_ceca_step_satisfied_still_works():
-    adapter = make_adapter(['{"bundle_value": 10}', '{"bundle_value": 5}'])
-    # {A}: value=10, price=10 → surplus 0.
-    # {B}: value=5, price=100 → surplus -95.  So {A} is best → satisfied.
-    response = adapter.ceca_step(
-        prices=price_fn({frozenset({"A"}): 10.0, frozenset({"B"}): 100.0}),
-        current_bundle=frozenset({"A"}),
-        round_idx=0,
-    )
-    assert response.satisfied is True
-
-
 def test_old_refine_still_works():
     adapter = make_adapter([
         '{"bundle_value": 10}',
@@ -252,56 +238,7 @@ def test_clock_prices_event_increments_demand_query_count():
 
 
 # ---------------------------------------------------------------------------
-# E. CECA step via old method and CECA_SATISFACTION event match
-# ---------------------------------------------------------------------------
-
-def test_ceca_satisfaction_event_satisfied_matches_old():
-    adapter_old = make_adapter(['{"bundle_value": 10}', '{"bundle_value": 5}'])
-    adapter_new = make_adapter(['{"bundle_value": 10}', '{"bundle_value": 5}'])
-
-    # {A}: value=10, price=10 → surplus 0.  {B}: value=5, price=100 → surplus -95.
-    pfn = price_fn({frozenset({"A"}): 10.0, frozenset({"B"}): 100.0})
-    resp_old = adapter_old.ceca_step(pfn, frozenset({"A"}), round_idx=0)
-    resp_ev = adapter_new.handle_event(ProxyElicitationEvent(
-        event_type=CECA_SATISFACTION,
-        bidder_id="b1",
-        mechanism="ceca",
-        round_idx=0,
-        payload={"prices": pfn, "current_bundle": frozenset({"A"})},
-    ))
-    resp_new = resp_ev.payload["ceca_response"]
-
-    assert resp_ev.response_type == "ceca_step"
-    assert resp_new.satisfied == resp_old.satisfied
-
-
-def test_ceca_satisfaction_event_unsatisfied_records_refinement():
-    responses = [
-        '{"bundle_value": 10}',
-        '{"bundle_value": 5}',
-        '{"satisfied": false, "preferred_bundle": ["B"]}',
-        '{"bundle_value": 50}',
-    ]
-    adapter = make_adapter(responses)
-    adapter.current_bid()
-    records_before = len(adapter.refinement_records())
-
-    resp_ev = adapter.handle_event(ProxyElicitationEvent(
-        event_type=CECA_SATISFACTION,
-        bidder_id="b1",
-        mechanism="ceca",
-        round_idx=1,
-        payload={"prices": price_fn({}), "current_bundle": frozenset()},
-    ))
-
-    assert resp_ev.response_type == "ceca_step"
-    assert not resp_ev.payload["ceca_response"].satisfied
-    assert len(resp_ev.records) > 0
-    assert len(adapter.refinement_records()) > records_before
-
-
-# ---------------------------------------------------------------------------
-# F. Optional interest map: proxy tolerates interest_map=None
+# E. Optional interest map: proxy tolerates interest_map=None
 # ---------------------------------------------------------------------------
 
 def test_proxy_works_without_interest_map():
@@ -323,20 +260,8 @@ def test_proxy_candidate_bundles_without_interest_map():
     assert len(bid.atoms) == 2
 
 
-def test_proxy_ceca_step_without_interest_map():
-    adapter = make_adapter(['{"bundle_value": 10}', '{"bundle_value": 5}'])
-    assert adapter.proxy.interest_map is None
-    # {A}: value=10, price=10 → surplus 0.  {B}: value=5, price=100 → surplus -95.
-    response = adapter.ceca_step(
-        price_fn({frozenset({"A"}): 10.0, frozenset({"B"}): 100.0}),
-        frozenset({"A"}),
-        round_idx=0,
-    )
-    assert response.satisfied is True
-
-
 # ---------------------------------------------------------------------------
-# G. Initialisation events on LlmInferredXorProxy.handle_event
+# F. Initialisation events on LlmInferredXorProxy.handle_event
 # ---------------------------------------------------------------------------
 
 def test_initial_preference_question_event_on_inner_proxy():

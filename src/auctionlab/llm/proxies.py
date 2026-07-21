@@ -4,11 +4,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 import time
-from typing import Callable
 
-from auctionlab.auction_types import Bundle, CecaBidderDiagnostic, Item
+from auctionlab.auction_types import Bundle, Item
 from auctionlab.bids.xor import XorAtomicBid, XorBid
-from auctionlab.instances.base import CecaStepResponse, DemandResponse, demand_rank_key
+from auctionlab.instances.base import DemandResponse, demand_rank_key
 from auctionlab.llm.bundles import bundle_sort_key
 from auctionlab.llm.clients import LlmClient
 from auctionlab.llm.interest_map import (
@@ -20,13 +19,15 @@ from auctionlab.llm.logging import LlmCallRecord, current_timestamp
 from auctionlab.llm.parsing import parse_proxy_question_response
 from auctionlab.llm.person_simulator import LlmPersonSimulator
 from auctionlab.llm.prompts import build_initial_proxy_question_prompt
-from auctionlab.llm.provisional_valuations import generate_provisional_valuations
+from auctionlab.llm.provisional_valuations import (
+    PvCandidateBundleStats,
+    compute_pv_candidate_bundle_stats,
+    generate_provisional_valuations,
+)
 from auctionlab.llm.schemas import LlmInterestMap
 from auctionlab.proxies.base import ElicitationEvent, ProxyStats, RefinementRecord
 from auctionlab.proxies.elicitation import candidate_refinements
 from auctionlab.proxies.events import (
-    CECA_SATISFACTION,
-    CECA_DEMAND_COUNTEREXAMPLE,
     CLOCK_DEMAND_CHANGED,
     CLOCK_NEAR_TIE,
     CLOCK_NEAR_ZERO_SURPLUS,
@@ -43,28 +44,6 @@ from auctionlab.proxies.events import (
     ProxyEventLogEntry,
     ProxyResponse,
 )
-
-
-@dataclass(frozen=True)
-class CecaTrimRecord:
-    """One item's trimming decision during atomic trimming."""
-
-    item: str
-    reduced_bundle: "Bundle"
-    raw_value: float
-    removed: bool
-
-
-@dataclass(frozen=True)
-class CecaTrimResult:
-    """Result of one atomic trimming step."""
-
-    raw_bundle: "Bundle"
-    trimmed_bundle: "Bundle"
-    raw_demanded_value: float
-    trim_value_queries: int
-    trim_items_removed: int
-    trim_trace: tuple["CecaTrimRecord", ...]
 
 
 def enforce_atom_monotonicity(atoms: list[XorAtomicBid]) -> None:
@@ -146,19 +125,11 @@ class LlmInferredXorProxy:
     _provisional_bundles: set[Bundle] = field(
         default_factory=set, init=False, repr=False
     )
-    ceca_atomic_trimming: bool = True
-    ceca_trim_value_tolerance: float = 0.0
-    _last_trim_result: "CecaTrimResult | None" = field(
-        default=None, init=False, repr=False
-    )
-    # Persists discounted values for sub-bundles queried during atomic trimming
-    # so repeated trim attempts on the same bundle (across CECA rounds) do not
-    # re-issue value queries.  Keyed by frozenset bundle.
-    _trim_value_cache: dict = field(
-        default_factory=dict, init=False, repr=False
-    )
     event_log: list[ProxyEventLogEntry] = field(
         default_factory=list, init=False, repr=False
+    )
+    last_pv_candidate_stats: PvCandidateBundleStats | None = field(
+        default=None, init=False, repr=False
     )
 
     def __post_init__(self) -> None:
@@ -333,6 +304,7 @@ class LlmInferredXorProxy:
         client: LlmClient | None = None,
         interest_map: LlmInterestMap | None = None,
         discount_inferred: bool = True,
+        max_candidate_bundles: int | None = None,
     ) -> dict[Bundle, float]:
         """Generate provisional values and pre-populate the cached XOR bid.
 
@@ -343,6 +315,13 @@ class LlmInferredXorProxy:
         Deliberately does not pass the person's preference seed: estimates
         are grounded only in the NL question/answer actually exchanged, not
         private knowledge of the person's true values.
+
+        ``max_candidate_bundles``, when set, deterministically caps how many
+        of ``candidate_bundles`` are actually sent to the LLM (see
+        :func:`~auctionlab.llm.provisional_valuations.generate_provisional_valuations`).
+        When ``None`` (default), every candidate bundle is sent -- there is no
+        automatic, token-budget-derived truncation. The resulting counts are
+        recorded on :attr:`last_pv_candidate_stats`.
         """
         if not self.nl_transcript:
             raise RuntimeError(
@@ -350,6 +329,10 @@ class LlmInferredXorProxy:
             )
         nl_question, nl_answer = self.nl_transcript[-1]
         pv_client = client or self.person.client
+
+        self.last_pv_candidate_stats = compute_pv_candidate_bundle_stats(
+            candidate_bundles, max_candidate_bundles
+        )
 
         t0 = time.perf_counter()
         print(f"  {self.bidder_id:<12}  pv", end="", flush=True)
@@ -365,7 +348,7 @@ class LlmInferredXorProxy:
             logger=self.person.logger,
             bidder_id=self.bidder_id,
             model_name=self.person.model_name,
-            # max_bundles=None → auto-derived from client.max_tokens inside
+            max_bundles=max_candidate_bundles,
         )
 
         latency = time.perf_counter() - t0
@@ -498,8 +481,11 @@ class LlmInferredXorProxy:
                 client=p.get("client"),
                 interest_map=p.get("interest_map", self.interest_map),
                 discount_inferred=p.get("discount_inferred", True),
+                max_candidate_bundles=p.get("max_candidate_bundles"),
             )
             state_delta = {"provisional_value_count": len(raw_values)}
+            if self.last_pv_candidate_stats is not None:
+                state_delta.update(self.last_pv_candidate_stats.as_dict())
             response = ProxyResponse(
                 response_type="provisional_values",
                 payload={"raw_values": raw_values},
@@ -1037,243 +1023,6 @@ class LlmInferredXorProxy:
             top_k=top_k,
         )
 
-    def _prune_demanded_bundle(
-        self,
-        bundle: Bundle,
-        demanded_value: float,
-    ) -> "CecaTrimResult":
-        """CECA atomic trimming (Huang et al. DNF/proper-learning update step).
-
-        For each item (processed against the progressively-shrinking bundle,
-        not the original), value-queries the bundle without it; if removing
-        that item leaves value within ``ceca_trim_value_tolerance`` of
-        ``demanded_value`` (the original, fixed comparison point), the item
-        is dropped permanently. Costs up to one extra value query per item in
-        ``bundle``, tracked via ``pruning_query_count``.
-
-        Returns a :class:`CecaTrimResult` with full diagnostics including the
-        trimmed atom, number of queries issued, items removed, and a per-item
-        trace.
-        """
-        pruned = bundle
-        transcript_context = self.knowledge_base.context_for_prompt() or None
-        trim_queries = 0
-        trace: list[CecaTrimRecord] = []
-
-        for item in sorted(bundle):
-            if len(pruned) <= 1 or item not in pruned:
-                continue
-            candidate = pruned - {item}
-            if not candidate:
-                continue
-
-            # 1) Check the proxy's cached bid atoms.
-            cached = next(
-                (a.value for a in self._cached_bid.atoms if a.bundle == candidate),
-                None,
-            )
-            if cached is not None:
-                value_without_item = cached
-                raw_value_for_trace = cached
-            elif candidate in self._trim_value_cache:
-                # 2) Hit the cross-round trim cache — avoids redundant VQs.
-                value_without_item = self._trim_value_cache[candidate]
-                raw_value_for_trace = value_without_item
-            else:
-                raw_value = self.person.value_query(
-                    candidate,
-                    transcript_context=transcript_context,
-                )
-                self.pruning_query_count += 1
-                trim_queries += 1
-                value_without_item = (
-                    raw_value * self.epsilon
-                    if self._cached_discount_inferred
-                    else raw_value
-                )
-                raw_value_for_trace = value_without_item
-                self._trim_value_cache[candidate] = value_without_item
-                self.transcript.append(
-                    TranscriptEntry(
-                        kind="ceca_trim_value_query",
-                        content=(
-                            f"bundle={sorted(candidate)}; "
-                            f"value={value_without_item}; "
-                            f"demanded_value={demanded_value}"
-                        ),
-                    )
-                )
-            removed = abs(value_without_item - demanded_value) <= self.ceca_trim_value_tolerance
-            trace.append(
-                CecaTrimRecord(
-                    item=item,
-                    reduced_bundle=candidate,
-                    raw_value=raw_value_for_trace,
-                    removed=removed,
-                )
-            )
-            if removed:
-                pruned = candidate
-
-        return CecaTrimResult(
-            raw_bundle=bundle,
-            trimmed_bundle=pruned,
-            raw_demanded_value=demanded_value,
-            trim_value_queries=trim_queries,
-            trim_items_removed=len(bundle) - len(pruned),
-            trim_trace=tuple(trace),
-        )
-
-    def ceca_step(
-        self,
-        prices: Callable[[Bundle], float],
-        current_bundle: Bundle,
-        round_idx: int = 0,
-    ) -> CecaStepResponse:
-        """Respond to a CECA personalized-price step.
-
-        First checks the proxy's own cached belief for a no-LLM-call
-        shortcut: if ``current_bundle`` already maximizes XOR-induced
-        surplus among cached atoms, no query is needed.  Ties are broken
-        in favour of the status-quo ``current_bundle``.  Otherwise asks the
-        person directly -- the cached belief can be stale -- and if the
-        person also reports satisfaction, trusts them with no atom update.
-        If genuinely unsatisfied, revalues and prunes the demanded bundle,
-        upserts it into the cached bid (inheriting monotonicity repair via
-        :meth:`_revalue_and_upsert_atom`), and reports it to the mechanism.
-        """
-        if self._cached_bid is None:
-            raise RuntimeError(
-                "No cached XOR bid is available; call infer_cached_xor_bid first"
-            )
-
-        current_bundle = frozenset(current_bundle)
-
-        def rank_key(bundle: Bundle, value: float) -> tuple:
-            surplus = value - prices(bundle)
-            return (-surplus, 0 if bundle == current_bundle else 1, tuple(sorted(bundle)), -value)
-
-        current_value = next(
-            (a.value for a in self._cached_bid.atoms if a.bundle == current_bundle),
-            0.0,
-        )
-        alloc_price = prices(current_bundle)
-        alloc_utility = current_value - alloc_price
-
-        best_bundle = current_bundle
-        best_key = rank_key(current_bundle, current_value)
-
-        for atom in self._cached_bid.atoms:
-            key = rank_key(atom.bundle, atom.value)
-            if key < best_key:
-                best_key = key
-                best_bundle = atom.bundle
-
-        if best_bundle == current_bundle:
-            diag = CecaBidderDiagnostic(
-                allocated_bundle=current_bundle,
-                allocated_lindahl_price=alloc_price,
-                allocated_manifest_value=current_value,
-                allocated_utility=alloc_utility,
-                best_bundle=None,
-                best_value=None,
-                best_price=None,
-                best_utility=None,
-                utility_gap=None,
-                satisfied=True,
-            )
-            return CecaStepResponse(satisfied=True, demanded_bundle=None, value=None, diagnostic=diag)
-
-        manifest_prices = {atom.bundle: atom.value for atom in self._cached_bid.atoms}
-        response = self.person.ceca_demand_query(current_bundle, manifest_prices)
-
-        if response.satisfied:
-            diag = CecaBidderDiagnostic(
-                allocated_bundle=current_bundle,
-                allocated_lindahl_price=alloc_price,
-                allocated_manifest_value=current_value,
-                allocated_utility=alloc_utility,
-                best_bundle=None,
-                best_value=None,
-                best_price=None,
-                best_utility=None,
-                utility_gap=None,
-                satisfied=True,
-            )
-            return CecaStepResponse(satisfied=True, demanded_bundle=None, value=None, diagnostic=diag)
-
-        preferred_bundle = (
-            frozenset(
-                item
-                for item in response.preferred_bundle
-                if item in self.person.item_descriptions
-            )
-            if response.preferred_bundle is not None
-            else None
-        )
-
-        if not preferred_bundle or preferred_bundle == current_bundle:
-            preferred_bundle = best_bundle
-
-        demanded_value = self._revalue_and_upsert_atom(
-            preferred_bundle,
-            "ceca_demand_query",
-            use_anchor_values=True,
-            transcript_kind="ceca_demand_query",
-        )
-
-        if self.ceca_atomic_trimming:
-            trim_result = self._prune_demanded_bundle(preferred_bundle, demanded_value)
-            self._last_trim_result = trim_result
-            pruned_bundle = trim_result.trimmed_bundle
-        else:
-            self._last_trim_result = None
-            pruned_bundle = preferred_bundle
-
-        if pruned_bundle != preferred_bundle:
-            # Reuse the value already queried for the unpruned bundle --
-            # pruning only ever drops items that didn't raise the value, so
-            # re-querying the smaller bundle would be redundant, matching
-            # alpha-main's heuristic (it stores the pruned bundle at the
-            # value found for the unpruned one).
-            self._cached_bid.atoms = [
-                atom
-                for atom in self._cached_bid.atoms
-                if atom.bundle != preferred_bundle
-            ]
-            replacement = XorAtomicBid(bundle=pruned_bundle, value=demanded_value)
-            for idx, atom in enumerate(self._cached_bid.atoms):
-                if atom.bundle == pruned_bundle:
-                    self._cached_bid.atoms[idx] = replacement
-                    break
-            else:
-                self._cached_bid.atoms.append(replacement)
-            self._enforce_subset_superset_monotonicity()
-            demanded_value = next(
-                atom.value
-                for atom in self._cached_bid.atoms
-                if atom.bundle == pruned_bundle
-            )
-
-        best_price = prices(pruned_bundle)
-        best_utility = demanded_value - best_price
-        diag = CecaBidderDiagnostic(
-            allocated_bundle=current_bundle,
-            allocated_lindahl_price=alloc_price,
-            allocated_manifest_value=current_value,
-            allocated_utility=alloc_utility,
-            best_bundle=pruned_bundle,
-            best_value=demanded_value,
-            best_price=best_price,
-            best_utility=best_utility,
-            utility_gap=best_utility - alloc_utility,
-            satisfied=False,
-        )
-        return CecaStepResponse(
-            satisfied=False, demanded_bundle=pruned_bundle, value=demanded_value, diagnostic=diag
-        )
-
-
 @dataclass
 class LlmAuctionProxyAdapter:
     """Adapt :class:`LlmInferredXorProxy` to the common proxy protocols.
@@ -1296,8 +1045,6 @@ class LlmAuctionProxyAdapter:
     _refinement_records: list[RefinementRecord] = field(
         default_factory=list, init=False, repr=False
     )
-    ceca_atomic_trimming: bool = True
-    ceca_trim_value_tolerance: float = 0.0
 
     def current_bid(self) -> XorBid:
         had_cached_bid = self.proxy._cached_bid is not None
@@ -1324,61 +1071,6 @@ class LlmAuctionProxyAdapter:
         self.current_bid()
         self._stats.demand_queries += 1
         return self.proxy.clock_demand_from_cached_bid(prices, top_k=top_k)
-
-    def ceca_step(
-        self,
-        prices: Callable[[Bundle], float],
-        current_bundle: Bundle,
-        round_idx: int = 0,
-    ) -> CecaStepResponse:
-        self.current_bid()
-        self._stats.demand_queries += 1
-        current_bundle = frozenset(current_bundle)
-        lindahl_price = prices(current_bundle)
-
-        # Snapshot pre-step atom values so RefinementRecord can report old_value.
-        cached_before = self.proxy._cached_bid
-        old_values: dict[Bundle, float] = (
-            {a.bundle: a.value for a in cached_before.atoms}
-            if cached_before is not None
-            else {}
-        )
-
-        response = self.proxy.ceca_step(prices, current_bundle, round_idx)
-
-        if not response.satisfied and response.demanded_bundle is not None:
-            demanded = response.demanded_bundle
-            new_cached = self.proxy._cached_bid
-            new_value = next(
-                (a.value for a in new_cached.atoms if a.bundle == demanded),
-                response.value,
-            ) if new_cached is not None else response.value
-
-            self._refinement_records.append(
-                RefinementRecord(
-                    bidder_id=self.bidder_id,
-                    mechanism="ceca",
-                    event_type="unsatisfied_demand",
-                    round_idx=round_idx,
-                    bundle=demanded,
-                    old_value=old_values.get(demanded),
-                    new_value=new_value,
-                    reason=f"lindahl_price={lindahl_price:.2f}",
-                    query_text=self.proxy._last_refinement_query_text,
-                    response_summary=self.proxy._last_refinement_response_summary,
-                )
-            )
-            self._stats.refinement_queries = self.proxy.refinement_query_count
-
-        return response
-
-    @property
-    def pruning_query_count(self) -> int:
-        return self.proxy.pruning_query_count
-
-    @property
-    def last_trim_result(self) -> "CecaTrimResult | None":
-        return getattr(self.proxy, '_last_trim_result', None)
 
     def _refine_single_bundle(
         self,
@@ -1467,14 +1159,11 @@ class LlmAuctionProxyAdapter:
         ``infer_interest_map``, ``generate_candidate_bundles``,
         ``infer_provisional_values``) are forwarded to the inner
         :class:`LlmInferredXorProxy`. Mechanism events (``submit_bid``,
-        ``sealed_feedback``, ``clock_prices``, ``ceca_satisfaction``) are
-        handled directly by the adapter's existing methods so that stats
-        and refinement records are updated correctly.
+        ``sealed_feedback``, ``clock_prices``) are handled directly by the
+        adapter's existing methods so that stats and refinement records are
+        updated correctly.
 
         Raises :exc:`ValueError` for unknown event types.
-
-        Old public methods (``submit_bid``, ``demand_at_prices``,
-        ``ceca_step``, ``refine``) remain unchanged and fully functional.
         """
         if event.event_type not in _KNOWN_EVENT_TYPES:
             raise ValueError(
@@ -1546,26 +1235,6 @@ class LlmAuctionProxyAdapter:
                     records=list(new_records),
                     state_delta=state_delta,
                 )
-
-        elif event.event_type in (CECA_SATISFACTION, CECA_DEMAND_COUNTEREXAMPLE):
-            prices_fn = p["prices"]
-            current_bundle = p["current_bundle"]
-            round_idx = event.round_idx or 0
-            ceca_resp = self.ceca_step(prices_fn, current_bundle, round_idx)
-            new_records = self._refinement_records[records_before:]
-            state_delta = {
-                "satisfied": ceca_resp.satisfied,
-                "demanded_bundle": (
-                    sorted(ceca_resp.demanded_bundle)
-                    if ceca_resp.demanded_bundle else None
-                ),
-            }
-            response = ProxyResponse(
-                response_type="ceca_step",
-                payload={"ceca_response": ceca_resp},
-                records=list(new_records),
-                state_delta=state_delta,
-            )
 
         else:
             raise ValueError(f"Unhandled event type: {event.event_type!r}")

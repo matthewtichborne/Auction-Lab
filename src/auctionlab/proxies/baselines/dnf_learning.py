@@ -16,11 +16,9 @@ into the existing proxy-mediated clock and sealed runners as a benchmark.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Callable
-
 from auctionlab.auction_types import Bundle, Item
 from auctionlab.bids.xor import XorAtomicBid, XorBid
-from auctionlab.instances.base import CecaStepResponse, DemandResponse, demand_rank_key
+from auctionlab.instances.base import DemandResponse, demand_rank_key
 from auctionlab.llm.person_simulator import LlmPersonSimulator
 from auctionlab.proxies.base import ElicitationEvent, ProxyStats, RefinementRecord
 
@@ -162,41 +160,6 @@ class DnfLearningProxy:
             supplementary_atoms=supplementary_atoms,
             primary_bundles=[atom.bundle for atom in candidates[:top_k]],
         )
-
-    def ceca_step(
-        self,
-        prices: Callable[[Bundle], float],
-        current_bundle: Bundle,
-        round_idx: int = 0,
-    ) -> CecaStepResponse:
-        """CECA demand step per Algorithm 1: demand query, then Lxor_step if unsatisfied.
-
-        Asks the person whether they prefer a different bundle given the
-        current manifest atom prices.  If not satisfied, shrinks the
-        preferred bundle to its minimal sub-bundle (Algorithm 2) and upserts
-        that atom into the learned bid.
-        """
-        self._stats.demand_queries += 1
-        current_bundle = frozenset(current_bundle)
-
-        manifest_prices = {atom.bundle: atom.value for atom in self._bid.atoms}
-        response = self.person.ceca_demand_query(current_bundle, manifest_prices)
-
-        if response.satisfied:
-            return CecaStepResponse(satisfied=True, demanded_bundle=None, value=None)
-
-        preferred = (
-            frozenset(response.preferred_bundle)
-            if response.preferred_bundle is not None
-            else current_bundle
-        )
-        if not preferred:
-            preferred = current_bundle
-
-        atomic_bundle, value = self._learn_atomic_bundle(preferred)
-        _upsert_atom(self._bid, atomic_bundle, value)
-
-        return CecaStepResponse(satisfied=False, demanded_bundle=atomic_bundle, value=value)
 
     def refine(self, event: ElicitationEvent) -> None:
         if event.bundles:

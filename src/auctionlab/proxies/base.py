@@ -1,20 +1,17 @@
-"""Common proxy-mediated elicitation interfaces for sealed, clock, and CECA
-auctions.
+"""Common proxy-mediated elicitation interfaces for sealed and clock auctions.
 
-Mechanisms are sealed XOR VCG, ascending clock with supplementary VCG, and
-CECA (Competitive Equilibrium Combinatorial Auction). Proxies maintain
-candidate XOR bids and expose a generic ``refine`` hook that mechanisms can
-call when they have useful feedback to share.
+Proxies maintain candidate XOR bids and expose a generic ``refine`` hook
+that mechanisms can call when they have useful feedback to share.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Callable, Protocol, runtime_checkable
+from typing import Protocol, runtime_checkable
 
 from auctionlab.auction_types import Bundle, Item
 from auctionlab.bids.xor import XorBid
-from auctionlab.instances.base import CecaStepResponse, DemandResponse
+from auctionlab.instances.base import DemandResponse
 
 
 def clone_xor_bid(bid: XorBid) -> XorBid:
@@ -129,26 +126,3 @@ class SealedAuctionProxy(AuctionProxy, Protocol):
         ...
 
 
-@runtime_checkable
-class CecaAuctionProxy(AuctionProxy, Protocol):
-    """Proxy interface used by the CECA mechanism.
-
-    A sibling protocol to :class:`ClockAuctionProxy`, not a subtype: CECA's
-    prices are Lindahl-style and bundle-keyed (personalized per bidder from
-    their own reported atomic bids), which doesn't fit
-    ``demand_at_prices``'s shared item-keyed price vector.
-    """
-
-    def ceca_step(
-        self,
-        prices: Callable[[Bundle], float],
-        current_bundle: Bundle,
-        round_idx: int,
-    ) -> CecaStepResponse:
-        """Report satisfaction with ``current_bundle`` at bundle-keyed prices.
-
-        If not satisfied, the response carries the bidder's true demanded
-        bundle and value, which the mechanism folds into the bidder's
-        manifest XOR bid.
-        """
-        ...

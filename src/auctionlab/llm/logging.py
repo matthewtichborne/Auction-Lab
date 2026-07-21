@@ -89,6 +89,24 @@ class LlmCallLogger:
             for k, v in self._stats.items()
         }
 
+    def total_stats(self) -> dict[str, CallTypeStats]:
+        """Return cumulative per-prompt-type stats since logger creation.
+
+        Unlike :meth:`stats_since_mark`, this is unaffected by ``mark()``,
+        so callers that need their own independent running baseline (e.g.
+        per-round token deltas nested inside a per-arm ``mark()`` window)
+        can snapshot totals without disturbing the outer watermark.
+        """
+        return dict(self._stats)
+
+    def total_tokens(self) -> tuple[int, int]:
+        """Cumulative (input, output) tokens logged so far, ignoring ``mark()``."""
+        stats = self._stats.values()
+        return (
+            sum(s.input_tokens for s in stats),
+            sum(s.output_tokens for s in stats),
+        )
+
     def stats_since_mark(self) -> dict[str, CallTypeStats]:
         """Return per-prompt-type stats accumulated since the last ``mark``."""
         result: dict[str, CallTypeStats] = {}
