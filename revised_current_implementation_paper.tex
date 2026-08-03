@@ -1553,6 +1553,52 @@ event and VCG-witness diagnostics, calibration evidence, selected trajectories,
 environment tables, and both PDF and PNG figures. Rebuilding these outputs
 does not mutate the frozen scenario, elicitation packs, or auction runs.
 
+\subsection{Software Test Suite}
+\label{app:test-suite}
+
+The accompanying implementation has an offline regression suite of 880 tests,
+run from the repository root by:
+
+\begin{verbatim}
+./venv/bin/python -m pytest -q
+\end{verbatim}
+
+The suite is organised around five verification boundaries. First, auction
+primitives test winner determination, deterministic tie breaking, supplementary
+bids, sealed VCG payments, winner-removal witnesses, clock demand, price
+updates, and natural termination. Second, proxy tests exercise event dispatch,
+sealed and clock trajectories, exact-value deduplication, candidate-bundle
+construction, interest-map exclusions and acquisition modes, provisional-value
+chunking, calibration, and query accounting. These tests include adverse cases
+such as malformed structured output, omitted goods, false exclusivity,
+incomplete chunks, repeated events, and exhausted retries.
+
+Third, model-interface tests cover role-specific clients, prompt construction,
+response schemas and parsers, token and call logging, retry classification, and
+SQLite cache semantics. They use deterministic mock clients and temporary
+stores; running the test suite neither requires API credentials nor makes live
+model calls. Fourth, environment and preparation tests cover scenario-schema
+validation, generated-population constraints, deterministic nested sampling,
+frozen-pack projection, hidden-information boundaries, and environment
+fingerprints. In particular, a frozen elicitation pack is rejected if replayed
+against a different environment, and its serialised public data is checked not
+to contain the hidden valuation table.
+
+Finally, experiment-level tests verify the scalability grid, frozen experiment
+specification, input hashes, resolved mechanism policies, output schemas,
+interest-map and scalability summaries, calibration provenance, and analytic
+pipeline commands. The full-information proxy is retained only as a test oracle
+for mechanism comparisons; it is not an experimental proxy treatment.
+
+These are tests of implementation correctness and reproducibility, not
+statistical evidence for the behavioural quality of model-generated answers or
+for the economic performance of the mechanisms. Those claims instead rely on
+the frozen empirical evaluation reported in Section~\ref{sec:results}. The
+separation is deliberate: mock-based tests establish that a specified response
+is processed correctly, frozen hashes establish that the reported inputs have
+not changed, and the multi-seed experiments measure the consequences of those
+inputs.
+
 \bibliographystyle{plainnat}
 \bibliography{references}
 
