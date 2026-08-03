@@ -1,0 +1,11 @@
+mechanism,held_out_seed,selected_treatment,training_best_treatments,training_mean_efficiency,held_out_efficiency,held_out_value_queries,frozen_treatment,frozen_treatment_held_out_efficiency
+sealed,0,recommended,recommended,0.9885366610932362,1.0,16.0,recommended,1.0
+sealed,1,recommended,recommended|recommended_without_scarcity,0.9894824366291758,0.9962168978562421,21.0,recommended,0.9962168978562421
+sealed,2,recommended,recommended,0.9885366610932362,1.0,58.0,recommended,1.0
+sealed,3,recommended,recommended,0.9918751704100065,0.9866459627329193,19.0,recommended,0.9866459627329193
+sealed,4,recommended,recommended,0.9957157151472904,0.9712837837837838,17.0,recommended,0.9712837837837838
+clock,0,focused_revealed_winner_sandwich,focused_revealed_winner_sandwich,0.9509003754259456,0.9823008849557522,7.0,focused_revealed_winner_sandwich,0.9823008849557522
+clock,1,focused_revealed_winner_sandwich,focused_revealed_winner_sandwich,0.9565638690482381,0.9596469104665826,5.0,focused_revealed_winner_sandwich,0.9596469104665826
+clock,2,focused_revealed_winner_sandwich,focused_revealed_winner_sandwich,0.9464755966648837,1.0,39.0,focused_revealed_winner_sandwich,1.0
+clock,3,focused_revealed_winner_sandwich,focused_revealed_winner_sandwich,0.9783078948015296,0.8726708074534162,5.0,focused_revealed_winner_sandwich,0.8726708074534162
+clock,4,focused_revealed_winner_sandwich,focused_revealed_winner_sandwich,0.9536546507189377,0.9712837837837838,11.0,focused_revealed_winner_sandwich,0.9712837837837838

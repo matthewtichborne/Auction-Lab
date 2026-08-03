@@ -1,0 +1,294 @@
+{
+  "schema_version": "pc_build_population_design_v1",
+  "description": "A 16-good master population with variable category cardinality and 16 diverse bidder archetypes. Auction experiments sample at most 10 goods and 10 bidders.",
+  "goods": [
+    {
+      "id": "CPU_HI",
+      "description": "High-performance 16-core desktop processor for demanding gaming, creative, and compute workloads.",
+      "category": "cpu"
+    },
+    {
+      "id": "CPU_MID",
+      "description": "Balanced 8-core desktop processor offering strong general-purpose performance.",
+      "category": "cpu"
+    },
+    {
+      "id": "CPU_LO",
+      "description": "Entry-level 4-core desktop processor for basic productivity and budget systems.",
+      "category": "cpu"
+    },
+    {
+      "id": "GPU_AI",
+      "description": "Professional accelerator with high VRAM capacity for AI training and technical compute.",
+      "category": "gpu"
+    },
+    {
+      "id": "GPU_GAM_HI",
+      "description": "High-end gaming graphics card for high-resolution and high-frame-rate play.",
+      "category": "gpu"
+    },
+    {
+      "id": "GPU_VALUE",
+      "description": "Value-oriented graphics card for mainstream gaming and light acceleration.",
+      "category": "gpu"
+    },
+    {
+      "id": "RAM_128",
+      "description": "128GB high-speed memory kit for large professional, server, and AI workloads.",
+      "category": "ram"
+    },
+    {
+      "id": "RAM_64",
+      "description": "64GB high-speed memory kit for demanding multitasking, gaming, and creation.",
+      "category": "ram"
+    },
+    {
+      "id": "RAM_32",
+      "description": "32GB mainstream memory kit for general productivity and gaming.",
+      "category": "ram"
+    },
+    {
+      "id": "MB_PRO",
+      "description": "Workstation motherboard with robust power delivery, expansion, and high-speed connectivity.",
+      "category": "motherboard"
+    },
+    {
+      "id": "MB_STD",
+      "description": "Mainstream motherboard suitable for ordinary desktop builds.",
+      "category": "motherboard"
+    },
+    {
+      "id": "SSD_4TB",
+      "description": "High-performance 4TB NVMe solid-state drive for large datasets and media libraries.",
+      "category": "storage"
+    },
+    {
+      "id": "SSD_2TB",
+      "description": "Fast 2TB NVMe solid-state drive for applications, games, and everyday storage.",
+      "category": "storage"
+    },
+    {
+      "id": "PSU_1000",
+      "description": "Efficient 1000W modular power supply for high-performance components.",
+      "category": "power"
+    },
+    {
+      "id": "COOL_AIO",
+      "description": "High-capacity all-in-one liquid CPU cooler for sustained demanding workloads.",
+      "category": "cooling"
+    },
+    {
+      "id": "CASE_ATX",
+      "description": "Well-ventilated ATX chassis supporting the available motherboards and full-size components.",
+      "category": "chassis"
+    }
+  ],
+  "bidder_archetypes": [
+    {
+      "bidder_id": "enthusiast_gamer",
+      "stratum": "gaming_performance",
+      "brief": "Competitive gamer prioritising maximum frame rate and visual quality.",
+      "identity_text": "A long-time competitive gamer who regularly participates in online tournaments and organised team play."
+    },
+    {
+      "bidder_id": "value_gamer",
+      "stratum": "gaming_performance",
+      "brief": "Price-conscious gamer seeking strong performance per dollar.",
+      "identity_text": "A recreational gamer who spends evenings playing mainstream multiplayer and single-player games with friends."
+    },
+    {
+      "bidder_id": "streamer_creator",
+      "stratum": "gaming_performance",
+      "brief": "Game streamer balancing gaming performance with recording and editing.",
+      "identity_text": "A livestreamer and video creator who broadcasts gameplay and produces edited recordings for an online audience.",
+      "required_positive_goods": [
+        "GPU_AI",
+        "GPU_GAM_HI",
+        "RAM_128"
+      ]
+    },
+    {
+      "bidder_id": "overclocker",
+      "stratum": "gaming_performance",
+      "brief": "Hardware enthusiast who values premium cooling and robust supporting components.",
+      "identity_text": "A desktop-hardware hobbyist who enjoys assembling systems, experimenting with configurations, and documenting benchmark results.",
+      "required_positive_goods": [
+        "GPU_AI"
+      ]
+    },
+    {
+      "bidder_id": "student_builder",
+      "stratum": "budget_office",
+      "brief": "Student assembling an affordable system for study and occasional games.",
+      "identity_text": "A university student who uses a desktop for coursework, research, communication, and occasional games."
+    },
+    {
+      "bidder_id": "office_user",
+      "stratum": "budget_office",
+      "brief": "Office worker prioritising reliability and responsive everyday productivity.",
+      "identity_text": "An office employee whose working day involves documents, spreadsheets, web applications, and video meetings."
+    },
+    {
+      "bidder_id": "family_pc_buyer",
+      "stratum": "budget_office",
+      "brief": "Household buyer seeking a versatile shared computer within a firm budget.",
+      "identity_text": "A household organiser arranging a shared desktop for schoolwork, home administration, entertainment, and family use."
+    },
+    {
+      "bidder_id": "minimalist_user",
+      "stratum": "budget_office",
+      "brief": "Minimalist buyer wanting only the parts needed for a simple efficient desktop.",
+      "identity_text": "A light computer user whose routine consists mainly of email, browsing, writing, and managing personal records."
+    },
+    {
+      "bidder_id": "ai_researcher",
+      "stratum": "professional_ai",
+      "brief": "Machine-learning researcher prioritising accelerator memory, system RAM, and compute.",
+      "identity_text": "A machine-learning researcher who develops experiments, trains models, and analyses results locally.",
+      "required_positive_goods": [
+        "GPU_AI",
+        "RAM_128"
+      ]
+    },
+    {
+      "bidder_id": "creative_professional",
+      "stratum": "professional_ai",
+      "brief": "Video and media professional requiring throughput, memory, and fast storage.",
+      "identity_text": "An independent media professional who edits long-form video, processes photographs, and delivers finished productions to clients.",
+      "required_positive_goods": [
+        "GPU_AI",
+        "GPU_GAM_HI",
+        "RAM_128"
+      ]
+    },
+    {
+      "bidder_id": "software_developer",
+      "stratum": "professional_ai",
+      "brief": "Developer running compilers, containers, and virtual machines locally.",
+      "identity_text": "A software developer who works on several codebases and routinely runs development environments, automated tests, and local services."
+    },
+    {
+      "bidder_id": "data_analyst",
+      "stratum": "professional_ai",
+      "brief": "Data professional working with large local datasets and analytical workloads.",
+      "identity_text": "A data analyst who prepares datasets, runs statistical workflows, and produces reports and visualisations."
+    },
+    {
+      "bidder_id": "component_reseller",
+      "stratum": "reseller_procurement",
+      "brief": "Reseller who can sell multiple alternatives separately and values broad inventory.",
+      "identity_text": "An independent component reseller who maintains inventory and supplies parts to a varied base of local customers.",
+      "required_positive_goods": [
+        "GPU_AI",
+        "RAM_128"
+      ]
+    },
+    {
+      "bidder_id": "small_business_it",
+      "stratum": "reseller_procurement",
+      "brief": "Small-business IT buyer procuring dependable workstation components.",
+      "identity_text": "An IT administrator responsible for maintaining desktop systems used by employees at a small business."
+    },
+    {
+      "bidder_id": "home_server_operator",
+      "stratum": "reseller_procurement",
+      "brief": "Home-server operator prioritising memory, storage, reliability, and efficient compute.",
+      "identity_text": "A self-hosting enthusiast who operates personal services, development tools, and media applications from a home server.",
+      "required_positive_goods": [
+        "RAM_128"
+      ]
+    },
+    {
+      "bidder_id": "system_integrator",
+      "stratum": "reseller_procurement",
+      "brief": "System integrator assembling complete machines for different client requirements.",
+      "identity_text": "A small system integrator who assembles and configures desktop machines for several kinds of client.",
+      "required_positive_goods": [
+        "GPU_AI",
+        "RAM_128"
+      ]
+    }
+  ],
+  "population_constraints": {
+    "min_positive_bidders_per_good": 6,
+    "max_population_interest_density": 0.8,
+    "max_positive_goods_per_bidder_by_stratum": {
+      "gaming_performance": 13,
+      "budget_office": 11,
+      "professional_ai": 13,
+      "reseller_procurement": 13
+    },
+    "max_positive_goods_per_bidder_overrides": {
+      "component_reseller": 16,
+      "system_integrator": 16
+    },
+    "min_core_bidders_per_good": 2,
+    "min_strata_with_positive_value_per_good": 3,
+    "min_profiles_with_substitute_groups": 12,
+    "min_profiles_with_complement_groups": 12,
+    "enforce_monetary_semantics": true,
+    "required_multiway_substitute_categories": [
+      "cpu",
+      "gpu",
+      "ram"
+    ],
+    "choose_one_backup_factor_max": 0.0,
+    "can_use_multiple_backup_factor_min": 0.0,
+    "reseller_substitute_backup_factor_min": 0.7,
+    "high_backup_bidder_ids": [
+      "component_reseller",
+      "system_integrator"
+    ]
+  },
+  "sample_constraints": {
+    "min_positive_bidders_per_good": 2,
+    "min_positive_goods_per_bidder": 1,
+    "min_substitute_groups_by_goods": {
+      "4": 1,
+      "6": 2,
+      "8": 3
+    },
+    "min_complement_groups_by_goods": {
+      "4": 1,
+      "6": 2,
+      "8": 3
+    },
+    "min_distinct_substitute_groups_by_goods": {
+      "4": 1,
+      "6": 2,
+      "8": 3
+    },
+    "min_distinct_complement_groups_by_goods": {
+      "4": 1,
+      "6": 2,
+      "8": 3
+    },
+    "min_bidders_with_substitute_groups_by_goods": {
+      "4": 2,
+      "6": 3,
+      "8": 4
+    },
+    "min_bidders_with_complement_groups_by_goods": {
+      "4": 1,
+      "6": 2,
+      "8": 3
+    },
+    "min_good_categories_by_goods": {
+      "4": 3,
+      "6": 4,
+      "8": 5
+    },
+    "min_bidder_strata_by_bidders": {
+      "4": 3,
+      "6": 4,
+      "8": 4
+    },
+    "min_fraction_bidders_with_exclusions": 0.25,
+    "min_full_information_winners": 2,
+    "max_largest_winner_welfare_share_by_goods": {
+      "4": 0.91,
+      "6": 0.85,
+      "8": 0.8
+    }
+  }
+}

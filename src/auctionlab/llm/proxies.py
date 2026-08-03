@@ -11,6 +11,7 @@ from auctionlab.instances.base import DemandResponse, demand_rank_key
 from auctionlab.llm.bundles import bundle_sort_key
 from auctionlab.llm.clients import LlmClient
 from auctionlab.llm.interest_map import (
+    InterestMapFailurePolicy,
     derive_interest_map,
     generate_candidate_bundles_from_interest_map,
 )
@@ -21,10 +22,16 @@ from auctionlab.llm.person_simulator import LlmPersonSimulator
 from auctionlab.llm.prompts import build_initial_proxy_question_prompt
 from auctionlab.llm.provisional_valuations import (
     PvCandidateBundleStats,
+    PvChunkStats,
     compute_pv_candidate_bundle_stats,
-    generate_provisional_valuations,
+    generate_provisional_valuations_chunked,
 )
 from auctionlab.llm.schemas import LlmInterestMap
+from auctionlab.llm.value_calibration import (
+    NO_CALIBRATION,
+    ValueCalibration,
+    legacy_calibration,
+)
 from auctionlab.proxies.base import ElicitationEvent, ProxyStats, RefinementRecord
 from auctionlab.proxies.elicitation import candidate_refinements
 from auctionlab.proxies.events import (
@@ -44,6 +51,69 @@ from auctionlab.proxies.events import (
     ProxyEventLogEntry,
     ProxyResponse,
 )
+
+
+_SUPPORTED_SIZE_DISCOUNT_FAMILIES = (None, "exponential")
+
+
+def apply_value_calibration(
+    raw_value: float,
+    bundle_size: int,
+    *,
+    discount_inferred: bool,
+    epsilon: float = 1.0,
+    size_discount_family: str | None = None,
+    size_discount_k0: int = 3,
+    size_discount_gamma: float = 1.0,
+) -> float:
+    """Deprecated compatibility wrapper for the legacy epsilon transform.
+
+    Superseded by :class:`~auctionlab.llm.value_calibration.ValueCalibration`,
+    which additionally supports ``scale > 1`` (the correction the current
+    estimator actually needs), an explicit ``family``, a disclosed-budget cap,
+    and a stable config hash for run artefacts.
+
+    Retained because several call sites and tests still express calibration
+    through ``discount_inferred``/``epsilon``. Semantics are unchanged:
+    ``discount_inferred=False`` returns the raw value untouched, so
+    ``epsilon``/the size discount have **no effect whatsoever** without it.
+    Delegates to
+    :func:`~auctionlab.llm.value_calibration.legacy_calibration` so old and
+    new paths share one implementation.
+
+    Raises :exc:`ValueError` if ``size_discount_family`` is neither ``None``
+    nor ``"exponential"``, or if ``size_discount_gamma`` is not strictly
+    positive.
+    """
+    if size_discount_family not in _SUPPORTED_SIZE_DISCOUNT_FAMILIES:
+        raise ValueError(
+            "size_discount_family must be one of "
+            f"{_SUPPORTED_SIZE_DISCOUNT_FAMILIES}, got {size_discount_family!r}"
+        )
+    if size_discount_gamma <= 0:
+        raise ValueError(
+            f"size_discount_gamma must be > 0, got {size_discount_gamma!r}"
+        )
+
+    return legacy_calibration(
+        discount_inferred=discount_inferred,
+        epsilon=epsilon,
+        size_discount_family=size_discount_family,
+        size_discount_k0=size_discount_k0,
+        size_discount_gamma=size_discount_gamma,
+    ).apply(raw_value, bundle_size)
+
+
+def apply_epsilon_discount(
+    raw_value: float,
+    *,
+    epsilon: float,
+    discount_inferred: bool,
+) -> float:
+    """Epsilon-only special case of :func:`apply_value_calibration`."""
+    return apply_value_calibration(
+        raw_value, 0, discount_inferred=discount_inferred, epsilon=epsilon
+    )
 
 
 def enforce_atom_monotonicity(atoms: list[XorAtomicBid]) -> None:
@@ -91,11 +161,23 @@ class LlmInferredXorProxy:
 
     Candidate bundles are queried in size-first order so singleton values are
     available as optional calibration anchors for larger bundles.
+
+    Provisional-value calibration is configured either through the preferred
+    ``calibration`` field (a
+    :class:`~auctionlab.llm.value_calibration.ValueCalibration`) or through
+    the deprecated ``epsilon``/``size_discount_*`` fields. When
+    ``calibration`` is set it wins outright and the per-call
+    ``discount_inferred`` gate is ignored -- an explicit calibration is never
+    silently disabled by a flag somewhere else.
     """
 
     bidder_id: str
     person: LlmPersonSimulator
+    calibration: ValueCalibration | None = None
     epsilon: float = 0.75
+    size_discount_family: str | None = None
+    size_discount_k0: int = 3
+    size_discount_gamma: float = 1.0
     transcript: list[TranscriptEntry] = field(default_factory=list)
     nl_transcript: list[tuple[str, str]] = field(default_factory=list)
     knowledge_base: KnowledgeBase | None = field(default=None)
@@ -131,27 +213,108 @@ class LlmInferredXorProxy:
     last_pv_candidate_stats: PvCandidateBundleStats | None = field(
         default=None, init=False, repr=False
     )
+    last_pv_chunk_stats: PvChunkStats | None = field(
+        default=None, init=False, repr=False
+    )
 
     def __post_init__(self) -> None:
         if not 0.0 < self.epsilon <= 1.0:
             raise ValueError("epsilon must be in (0, 1]")
+        if self.size_discount_family not in _SUPPORTED_SIZE_DISCOUNT_FAMILIES:
+            raise ValueError(
+                "size_discount_family must be one of "
+                f"{_SUPPORTED_SIZE_DISCOUNT_FAMILIES}, got "
+                f"{self.size_discount_family!r}"
+            )
+        if self.size_discount_gamma <= 0:
+            raise ValueError(
+                f"size_discount_gamma must be > 0, got {self.size_discount_gamma!r}"
+            )
         if self.knowledge_base is None:
             # Default: share nl_transcript so both stay in sync.
             self.knowledge_base = TranscriptKnowledgeBase(self.nl_transcript)
 
+    # -- provisional-value calibration -----------------------------------
+
+    def effective_calibration(
+        self,
+        discount_inferred: bool = True,
+    ) -> ValueCalibration:
+        """Return the calibration actually applied to inferred values.
+
+        An explicit ``calibration`` always wins; otherwise the deprecated
+        ``epsilon``/``size_discount_*`` fields are translated under the
+        supplied ``discount_inferred`` gate.
+        """
+        if self.calibration is not None:
+            return self.calibration
+        return legacy_calibration(
+            discount_inferred=discount_inferred,
+            epsilon=self.epsilon,
+            size_discount_family=self.size_discount_family,
+            size_discount_k0=self.size_discount_k0,
+            size_discount_gamma=self.size_discount_gamma,
+        )
+
+    def disclosed_budget(self) -> float | None:
+        """The proxy-observable spending ceiling, if the person disclosed one.
+
+        Read from the interest map's ``budget_hint``, i.e. from what the
+        person actually said. Hidden ground-truth valuations are never
+        consulted here.
+        """
+        if self.interest_map is None:
+            return None
+        hint = getattr(self.interest_map, "budget_hint", None)
+        if hint is None:
+            return None
+        try:
+            budget = float(hint)
+        except (TypeError, ValueError):
+            return None
+        return budget if budget > 0 else None
+
+    def _calibrate(
+        self,
+        raw_value: float,
+        bundle_size: int,
+        *,
+        discount_inferred: bool,
+    ) -> float:
+        return self.effective_calibration(discount_inferred).apply(
+            raw_value,
+            bundle_size,
+            disclosed_budget=self.disclosed_budget(),
+        )
+
     def ask_initial_question(
         self,
         question_client: LlmClient | None = None,
+        question: str | None = None,
     ) -> None:
         """Ask the person an initial open-ended preference question (ωnvd).
 
         The question/answer pair is recorded in ``nl_transcript`` and used as
-        context for all later value inference. No-op if already asked. The
-        question is generated without the person's preference seed: the
-        proxy is meeting this person for the first time and must not have
-        private knowledge of their actual values.
+        context for all later value inference. No-op if already asked.
+        Supplying ``question`` delivers a frozen scenario-level instrument
+        without a question-generation LLM call. Omitting it retains the
+        legacy proxy-generated path for robustness experiments.
         """
         if self.knowledge_base:
+            return
+
+        if question is not None:
+            question = question.strip()
+            if not question:
+                raise ValueError("opening question must be non-empty")
+            answer = self.person.answer_question(question)
+            self.knowledge_base.add_qa(question, answer)
+            self.transcript.append(
+                TranscriptEntry(kind="nl_question", content=question)
+            )
+            self.transcript.append(
+                TranscriptEntry(kind="nl_answer", content=answer)
+            )
             return
 
         prompt = build_initial_proxy_question_prompt(
@@ -202,7 +365,21 @@ class LlmInferredXorProxy:
                         success=True,
                         error=None,
                         latency_seconds=latency,
-                        model=self.person.model_name,
+                        model=getattr(
+                            client,
+                            "_auctionlab_model",
+                            getattr(client, "model", self.person.model_name),
+                        ),
+                        provider=getattr(
+                            client,
+                            "_auctionlab_provider",
+                            None,
+                        ),
+                        llm_role=getattr(
+                            client,
+                            "_auctionlab_llm_role",
+                            "proxy",
+                        ),
                         attempt=attempt,
                         input_tokens=getattr(client, "_last_input_tokens", None),
                         output_tokens=getattr(client, "_last_output_tokens", None),
@@ -224,6 +401,8 @@ class LlmInferredXorProxy:
     def build_interest_map(
         self,
         client: LlmClient | None = None,
+        *,
+        failure_policy: InterestMapFailurePolicy = "all_items",
     ) -> LlmInterestMap:
         """Derive and cache an interest map from the most recent NL Q/A pair.
 
@@ -244,7 +423,13 @@ class LlmInferredXorProxy:
             nl_answer=nl_answer,
             logger=self.person.logger,
             bidder_id=self.bidder_id,
-            model_name=self.person.model_name,
+            model_name=getattr(
+                map_client,
+                "_auctionlab_model",
+                getattr(map_client, "model", self.person.model_name),
+            ),
+            scenario_id=self.person.scenario_id,
+            failure_policy=failure_policy,
         )
         self.transcript.append(
             TranscriptEntry(
@@ -253,7 +438,8 @@ class LlmInferredXorProxy:
                     f"interested={sorted(self.interest_map.interested_items)}; "
                     f"excluded={sorted(self.interest_map.excluded_items)}; "
                     f"complements={[sorted(g) for g in self.interest_map.complementary_groups]}; "
-                    f"substitutes={[sorted(g) for g in self.interest_map.substitute_groups]}"
+                    "substitutes="
+                    f"{[{'items': sorted(g.items), 'mode': g.acquisition_mode} for g in self.interest_map.substitute_groups]}"
                 ),
             )
         )
@@ -305,23 +491,35 @@ class LlmInferredXorProxy:
         interest_map: LlmInterestMap | None = None,
         discount_inferred: bool = True,
         max_candidate_bundles: int | None = None,
+        pv_chunk_size: int | None = None,
+        max_parse_retries: int = 0,
     ) -> dict[Bundle, float]:
         """Generate provisional values and pre-populate the cached XOR bid.
 
-        Calls the LLM once with all ``candidate_bundles`` and stores the
-        resulting values via :meth:`set_provisional_bid`. The optional
-        ``interest_map`` enriches the prompt; the function is fully usable
-        without it. Returns the raw value map (before epsilon discounting).
-        Deliberately does not pass the person's preference seed: estimates
-        are grounded only in the NL question/answer actually exchanged, not
-        private knowledge of the person's true values.
+        Calls the LLM once (or, when ``pv_chunk_size`` is set and the
+        candidate count exceeds it, once per deterministic chunk -- see
+        :func:`~auctionlab.llm.provisional_valuations.generate_provisional_valuations_chunked`)
+        over all ``candidate_bundles`` and stores the resulting values via
+        :meth:`set_provisional_bid`. The optional ``interest_map`` enriches
+        the prompt; the function is fully usable without it. Returns the raw
+        value map (before epsilon discounting). Deliberately does not pass
+        the person's preference seed: estimates are grounded only in the NL
+        question/answer actually exchanged, not private knowledge of the
+        person's true values.
 
         ``max_candidate_bundles``, when set, deterministically caps how many
-        of ``candidate_bundles`` are actually sent to the LLM (see
-        :func:`~auctionlab.llm.provisional_valuations.generate_provisional_valuations`).
-        When ``None`` (default), every candidate bundle is sent -- there is no
-        automatic, token-budget-derived truncation. The resulting counts are
-        recorded on :attr:`last_pv_candidate_stats`.
+        of ``candidate_bundles`` are actually sent to the LLM (before any
+        chunking). When ``None`` (default), every candidate bundle is sent --
+        there is no automatic, token-budget-derived truncation. The
+        resulting counts are recorded on :attr:`last_pv_candidate_stats`;
+        chunking activity is recorded separately on
+        :attr:`last_pv_chunk_stats`.
+
+        ``pv_chunk_size`` unset/0 (default), or a candidate count already at
+        or below it, makes exactly one PV call -- byte-for-byte the same
+        behaviour as before chunking existed. ``max_parse_retries`` retries a
+        malformed response for either the single call or, independently,
+        each chunk.
         """
         if not self.nl_transcript:
             raise RuntimeError(
@@ -337,7 +535,7 @@ class LlmInferredXorProxy:
         t0 = time.perf_counter()
         print(f"  {self.bidder_id:<12}  pv", end="", flush=True)
 
-        raw_values = generate_provisional_valuations(
+        raw_values, chunk_stats = generate_provisional_valuations_chunked(
             client=pv_client,
             scenario_description=self.person.scenario_description,
             item_descriptions=self.person.item_descriptions,
@@ -347,22 +545,37 @@ class LlmInferredXorProxy:
             interest_map=interest_map,
             logger=self.person.logger,
             bidder_id=self.bidder_id,
-            model_name=self.person.model_name,
+            model_name=getattr(
+                pv_client,
+                "_auctionlab_model",
+                getattr(pv_client, "model", self.person.model_name),
+            ),
             max_bundles=max_candidate_bundles,
+            scenario_id=self.person.scenario_id,
+            pv_chunk_size=pv_chunk_size,
+            max_parse_retries=max_parse_retries,
         )
+        self.last_pv_chunk_stats = chunk_stats
 
         latency = time.perf_counter() - t0
+        chunk_suffix = (
+            f"  [{chunk_stats.pv_chunks} chunks]" if chunk_stats.chunking_used else ""
+        )
         print(
-            f"  →  {len(raw_values)} values  ({latency:.1f}s)",
+            f"  →  {len(raw_values)} values  ({latency:.1f}s){chunk_suffix}",
             flush=True,
         )
 
         self._provisional_raw_values = raw_values
-        discounted = {
-            bundle: value * self.epsilon if discount_inferred else value
+        calibrated = {
+            bundle: self._calibrate(
+                value,
+                len(bundle),
+                discount_inferred=discount_inferred,
+            )
             for bundle, value in raw_values.items()
         }
-        self.set_provisional_bid(discounted, discount_inferred=discount_inferred)
+        self.set_provisional_bid(calibrated, discount_inferred=discount_inferred)
         return raw_values
 
     def replay_elicitation(
@@ -403,18 +616,24 @@ class LlmInferredXorProxy:
                         "complements="
                         f"{[sorted(g) for g in interest_map.complementary_groups]}; "
                         "substitutes="
-                        f"{[sorted(g) for g in interest_map.substitute_groups]}"
+                        f"{[{'items': sorted(g.items), 'mode': g.acquisition_mode} for g in interest_map.substitute_groups]}"
                     ),
                 )
             )
 
         if provisional_raw_values is not None:
+            # self.interest_map is assigned above, so the disclosed-budget cap
+            # sees the replayed budget hint rather than an empty proxy.
             self._provisional_raw_values = provisional_raw_values
-            discounted = {
-                bundle: value * self.epsilon if discount_inferred else value
+            calibrated = {
+                bundle: self._calibrate(
+                    value,
+                    len(bundle),
+                    discount_inferred=discount_inferred,
+                )
                 for bundle, value in provisional_raw_values.items()
             }
-            self.set_provisional_bid(discounted, discount_inferred=discount_inferred)
+            self.set_provisional_bid(calibrated, discount_inferred=discount_inferred)
 
     def handle_event(self, event: ProxyElicitationEvent) -> ProxyResponse:
         """Dispatch a proxy lifecycle event to the appropriate inner method.
@@ -441,7 +660,10 @@ class LlmInferredXorProxy:
         state_delta: dict = {}
 
         if event.event_type == INITIAL_PREFERENCE_QUESTION:
-            self.ask_initial_question(p.get("client"))
+            self.ask_initial_question(
+                p.get("client"),
+                question=p.get("question"),
+            )
             nl_q, nl_a = self.nl_transcript[-1] if self.nl_transcript else ("", "")
             state_delta = {"nl_transcript_length": len(self.nl_transcript)}
             response = ProxyResponse(
@@ -451,7 +673,10 @@ class LlmInferredXorProxy:
             )
 
         elif event.event_type == INFER_INTEREST_MAP:
-            im = self.build_interest_map(p.get("client"))
+            im = self.build_interest_map(
+                p.get("client"),
+                failure_policy=p.get("failure_policy", "all_items"),
+            )
             state_delta = {
                 "interested_items": sorted(im.interested_items),
                 "excluded_items": sorted(im.excluded_items),
@@ -482,10 +707,14 @@ class LlmInferredXorProxy:
                 interest_map=p.get("interest_map", self.interest_map),
                 discount_inferred=p.get("discount_inferred", True),
                 max_candidate_bundles=p.get("max_candidate_bundles"),
+                pv_chunk_size=p.get("pv_chunk_size"),
+                max_parse_retries=p.get("max_parse_retries", 0),
             )
             state_delta = {"provisional_value_count": len(raw_values)}
             if self.last_pv_candidate_stats is not None:
                 state_delta.update(self.last_pv_candidate_stats.as_dict())
+            if self.last_pv_chunk_stats is not None:
+                state_delta.update(self.last_pv_chunk_stats.as_dict())
             response = ProxyResponse(
                 response_type="provisional_values",
                 payload={"raw_values": raw_values},
@@ -562,7 +791,11 @@ class LlmInferredXorProxy:
             if len(bundle) == 1:
                 singleton_values[bundle] = value
 
-            reported_value = value * self.epsilon if discount_inferred else value
+            reported_value = self._calibrate(
+                value,
+                len(bundle),
+                discount_inferred=discount_inferred,
+            )
             inferred.append((bundle, reported_value))
             transcript_kind = (
                 "value_query_with_anchors"
@@ -682,6 +915,9 @@ class LlmInferredXorProxy:
                 "No cached XOR bid is available; call infer_cached_xor_bid first"
             )
 
+        calibration = self.effective_calibration(
+            bool(self._cached_discount_inferred)
+        )
         anchors: dict[Bundle, float] = {}
         if use_anchor_values:
             for atom in self._cached_bid.atoms:
@@ -692,8 +928,10 @@ class LlmInferredXorProxy:
                 ):
                     continue
                 raw_value = atom.value
-                if self._cached_discount_inferred:
-                    raw_value /= self.epsilon
+                # Already-refined atoms hold exact answers and were never
+                # calibrated, so only provisional atoms are inverted.
+                if atom.bundle not in self.refined_bundles:
+                    raw_value = calibration.invert(raw_value, len(atom.bundle))
                 anchors[atom.bundle] = raw_value
 
         value = self.person.value_query(
@@ -707,10 +945,17 @@ class LlmInferredXorProxy:
         self._last_refinement_query_text = query_text
         self._last_refinement_response_summary = response_summary
 
+        # Exact deterministic answers are ground truth, not estimates: they
+        # are reported verbatim under every calibration.
+        exact_oracle_value = self.person.ground_truth_valuations is not None
         reported_value = (
-            value * self.epsilon
-            if self._cached_discount_inferred
-            else value
+            value
+            if exact_oracle_value
+            else calibration.apply(
+                value,
+                len(bundle),
+                disclosed_budget=self.disclosed_budget(),
+            )
         )
         replacement = XorAtomicBid(
             bundle=bundle,
@@ -725,6 +970,15 @@ class LlmInferredXorProxy:
             self._cached_bid.atoms.append(replacement)
 
         self._enforce_subset_superset_monotonicity()
+        if exact_oracle_value:
+            # A noisy provisional subset may currently exceed this exact
+            # superset value. Free disposal is already represented by XOR
+            # utility (the subset atom remains usable), so do not let the
+            # monotonicity convenience repair overwrite an oracle answer.
+            for idx, atom in enumerate(self._cached_bid.atoms):
+                if atom.bundle == bundle:
+                    self._cached_bid.atoms[idx] = replacement
+                    break
         # Monotonicity repair can lift the just-refined atom (e.g. if a
         # cached subset has a higher value), so read back the final value
         # rather than trusting the raw query result.

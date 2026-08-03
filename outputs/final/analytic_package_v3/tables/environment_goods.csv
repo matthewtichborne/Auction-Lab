@@ -1,0 +1,17 @@
+good_id,category,positive_bidders,positive_bidder_share,core_bidders,positive_strata
+CPU_HI,cpu,11,0.6875,6,3
+CPU_MID,cpu,16,1.0,6,4
+CPU_LO,cpu,10,0.625,3,3
+GPU_AI,gpu,10,0.625,6,4
+GPU_GAM_HI,gpu,9,0.5625,5,4
+GPU_VALUE,gpu,10,0.625,5,4
+RAM_128,ram,11,0.6875,7,4
+RAM_64,ram,14,0.875,4,4
+RAM_32,ram,14,0.875,4,4
+MB_PRO,motherboard,13,0.8125,7,4
+MB_STD,motherboard,13,0.8125,7,4
+SSD_4TB,storage,12,0.75,6,4
+SSD_2TB,storage,16,1.0,7,4
+PSU_1000,power,15,0.9375,6,4
+COOL_AIO,cooling,11,0.6875,3,3
+CASE_ATX,chassis,15,0.9375,9,4

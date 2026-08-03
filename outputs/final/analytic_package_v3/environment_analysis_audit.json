@@ -1,0 +1,12 @@
+{
+  "scenario_spec": "scenarios/pc_build_v3/pc_build_population_16x16.json",
+  "validation_report": "scenarios/pc_build_v3/pc_build_population_16x16.validation.json",
+  "validation_passed": true,
+  "population_rows": 16,
+  "good_rows": 16,
+  "sample_rows": 95,
+  "expected_sample_rows": 95,
+  "all_sample_rows_passed": true,
+  "all_goods_contested_in_every_sample": true,
+  "finite_numeric_outputs": true
+}

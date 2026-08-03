@@ -3,61 +3,95 @@
 from __future__ import annotations
 
 import argparse
+import json
 import math
-from dataclasses import dataclass
 from pathlib import Path
 import sys
 
-from auctionlab.auctions.ceca import CecaConfig
 from auctionlab.auctions.clock import ClockConfig
-from auctionlab.experiments.export import write_csv
+from auctionlab.experiments.export import write_csv, write_csv_variable_rows
 from auctionlab.experiments.llm_comparison import (
-    ceca_result_to_row,
-    ceca_winner_diagnostics_rows,
     clock_llm_comparison_to_row,
     proxy_clock_result_to_row,
     proxy_sealed_result_to_row,
+    proxy_sealed_trajectory_to_rows,
     reported_bids_to_str,
     run_clock_llm_comparison,
     run_sealed_llm_comparison,
     sealed_llm_comparison_to_row,
 )
-from auctionlab.experiments.proxy_ceca_runner import (
-    ProxyCecaConfig,
-    ProxyCecaSharedResult,
-    ceca_satisfaction_diagnostic_rows,
-    finalize_proxy_ceca_result,
-    run_proxy_ceca_elicitation,
-    run_proxy_ceca_experiment,
-)
 from auctionlab.experiments.proxy_clock_runner import (
     ProxyClockConfig,
     run_proxy_clock_experiment,
 )
+from auctionlab.experiments.proxy_clock_trajectory import run_proxy_clock_trajectory
 from auctionlab.experiments.proxy_sealed_runner import (
     ProxySealedConfig,
     run_proxy_sealed_vcg_experiment,
+    run_proxy_sealed_vcg_trajectory,
 )
+from auctionlab.experiments.runner import run_sealed_vcg_experiment
 from auctionlab.experiments.run_config import (
+    EVENT_POLICIES,
     PRESETS,
+    add_calibration_fields,
     apply_preset,
+    build_run_config_document,
+    calibration_summary_fields,
     collect_arm_stats,
     collect_initial_stats,
     config_warnings,
     explicitly_set_args,
+    event_policy_summary_fields,
     format_run_config,
+    late_reflection_candidates_to_rows,
+    late_reflection_records_to_rows,
+    late_reflection_summary_fields,
     refinement_records_to_rows,
+    resolve_event_policy,
+    write_run_config_json,
 )
 from auctionlab.instances.nl_scenarios import (
     NaturalLanguageAuctionScenario,
     curated_natural_language_scenarios,
 )
 from auctionlab.llm.bundles import generate_candidate_bundles
-from auctionlab.llm.clients import OpenAICompatibleLlmClient
-from auctionlab.llm.logging import CallTypeStats, LlmCallLogger  # CallTypeStats used in print_arm_summary
+from auctionlab.llm.cache import (
+    DEFAULT_CACHE_PATH,
+    CacheStats,
+    CachingLlmClient,
+    LlmResponseCache,
+)
+from auctionlab.llm.clients import MockLlmClient, OpenAICompatibleLlmClient
+from auctionlab.llm.frozen_elicitation import (
+    BidderElicitationData,
+    ModelProvenance,
+    build_frozen_elicitation_pack,
+    load_frozen_elicitation_pack,
+    validate_pack_for_scenario,
+    write_frozen_elicitation_pack,
+)
+from auctionlab.llm.late_reflection import LateReflectionConfig
+from auctionlab.llm.interest_map import (
+    interest_map_accuracy,
+    interest_map_candidate_counts,
+    interest_map_quality_flags,
+)
+from auctionlab.llm.logging import (
+    CallTypeStats,
+    LlmCallLogger,
+    call_stats_from_records,
+)
 from auctionlab.llm.person_simulator import LlmPersonSimulator
+from auctionlab.llm.prompts import canonical_opening_question
+from auctionlab.llm.provisional_valuations import PvCandidateBundleStats, PvChunkStats
 from auctionlab.llm.proxies import LlmAuctionProxyAdapter, LlmInferredXorProxy
-from auctionlab.llm.schemas import LlmInterestMap
+from auctionlab.llm.value_calibration import (
+    NO_CALIBRATION,
+    CalibrationConfigError,
+    ValueCalibration,
+    resolve_cli_calibration,
+)
 from auctionlab.proxies.base import RefinementRecord
 from auctionlab.proxies.baselines.dnf_learning import DnfLearningProxy
 from auctionlab.proxies.events import (
@@ -68,12 +102,6 @@ from auctionlab.proxies.events import (
     ProxyElicitationEvent,
 )
 from auctionlab.proxies.baselines.hybrid import HybridProxy
-from auctionlab.proxies.baselines.llm_ceca import (
-    NvdCecaProxy,
-    SizeLimitedScope,
-    Vd1CecaProxy,
-    Vd2CecaProxy,
-)
 
 
 def parse_args() -> argparse.Namespace:
@@ -92,12 +120,20 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--provider",
-        choices=["ollama", "groq", "gemini", "openai-compatible"],
+        choices=[
+            "ollama",
+            "groq",
+            "gemini",
+            "openai",
+            "anthropic",
+            "openai-compatible",
+        ],
         default="ollama",
         help=(
-            "'groq' uses the Groq API (set GROQ_API_KEY, e.g. --model "
-            "llama-3.3-70b-versatile); 'gemini' uses the Gemini API "
-            "(set GEMINI_API_KEY, e.g. --model gemini-2.0-flash)."
+            "'openai' uses OPENAI_API_KEY; 'anthropic' uses "
+            "ANTHROPIC_API_KEY through Anthropic's OpenAI-compatible "
+            "endpoint; 'groq' uses GROQ_API_KEY; 'gemini' uses "
+            "GEMINI_API_KEY."
         ),
     )
     parser.add_argument("--model", default="llama3.1:8b")
@@ -105,28 +141,307 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--api-key",
         default=None,
-        help="API key for --provider groq/openai-compatible. For groq, "
-        "falls back to the GROQ_API_KEY env var.",
+        help=(
+            "Explicit API key. First-class providers otherwise use their "
+            "standard environment variable."
+        ),
     )
     parser.add_argument("--temperature", type=float, default=0.0)
+    parser.add_argument(
+        "--person-provider",
+        choices=[
+            "ollama",
+            "groq",
+            "gemini",
+            "openai",
+            "anthropic",
+            "openai-compatible",
+        ],
+        default=None,
+        help=(
+            "Provider for the simulated person (NL answers and value/demand "
+            "query answers). Defaults to --provider."
+        ),
+    )
+    parser.add_argument(
+        "--person-model",
+        default=None,
+        help="Model for the simulated person. Defaults to --model.",
+    )
+    parser.add_argument(
+        "--person-base-url",
+        default=None,
+        help="Person-provider base URL. Defaults to --base-url.",
+    )
+    parser.add_argument(
+        "--person-api-key",
+        default=None,
+        help=(
+            "Person-provider API key. Defaults to --api-key; provider "
+            "environment-variable fallback still applies when omitted."
+        ),
+    )
+    parser.add_argument(
+        "--person-temperature",
+        type=float,
+        default=None,
+        help="Person-model temperature. Defaults to --temperature.",
+    )
+    parser.add_argument(
+        "--proxy-provider",
+        choices=[
+            "ollama",
+            "groq",
+            "gemini",
+            "openai",
+            "anthropic",
+            "openai-compatible",
+        ],
+        default=None,
+        help=(
+            "Provider for proxy-side interest-map "
+            "extraction, provisional valuations, and late reflection. "
+            "Also generates the one shared opening question only when "
+            "--opening-question-policy proxy_generated is selected. "
+            "Defaults to --provider."
+        ),
+    )
+    parser.add_argument(
+        "--proxy-model",
+        default=None,
+        help="Model for proxy-side inference. Defaults to --model.",
+    )
+    parser.add_argument(
+        "--proxy-base-url",
+        default=None,
+        help="Proxy-provider base URL. Defaults to --base-url.",
+    )
+    parser.add_argument(
+        "--proxy-api-key",
+        default=None,
+        help=(
+            "Proxy-provider API key. Defaults to --api-key; provider "
+            "environment-variable fallback still applies when omitted."
+        ),
+    )
+    parser.add_argument(
+        "--proxy-temperature",
+        type=float,
+        default=None,
+        help="Proxy-model temperature. Defaults to --temperature.",
+    )
+    parser.add_argument(
+        "--verifier-provider",
+        choices=[
+            "ollama",
+            "groq",
+            "gemini",
+            "openai",
+            "anthropic",
+            "openai-compatible",
+        ],
+        default=None,
+        help=(
+            "Preparation-time person-answer verifier provider. Defaults to "
+            "the environment-generation provider recorded by the scenario, "
+            "then to --proxy-provider when unavailable."
+        ),
+    )
+    parser.add_argument("--verifier-model", default=None)
+    parser.add_argument("--verifier-base-url", default=None)
+    parser.add_argument("--verifier-api-key", default=None)
+    parser.add_argument(
+        "--verifier-temperature",
+        type=float,
+        default=0.0,
+    )
+    parser.add_argument(
+        "--verifier-max-tokens",
+        type=int,
+        default=2000,
+    )
     parser.add_argument("--max-tokens", type=int, default=300)
+    parser.add_argument(
+        "--person-nl-max-tokens",
+        type=int,
+        default=1500,
+        help=(
+            "Output-token budget for simulated-person answers to the opening "
+            "natural-language preference question. Kept separate from "
+            "--max-tokens so long NL answers do not truncate while ordinary "
+            "value/demand queries retain a compact budget."
+        ),
+    )
+    parser.add_argument(
+        "--interest-map-max-tokens",
+        type=int,
+        default=1500,
+        help=(
+            "Output-token budget for proxy interest-map extraction. Kept "
+            "separate from --max-tokens and --pv-max-tokens."
+        ),
+    )
+    parser.add_argument(
+        "--person-query-mode",
+        choices=["deterministic", "llm"],
+        default="deterministic",
+        help=(
+            "How the simulated person answers value/demand queries. "
+            "'deterministic' (default) uses the scenario's private valuation "
+            "table and makes no person-LLM call; 'llm' is a noisy robustness "
+            "treatment conditioned only on the brief qualitative disclosure."
+        ),
+    )
     parser.add_argument(
         "--ground-truth-queries",
         action="store_true",
         help=(
-            "Replace all LLM value/demand queries with ground-truth lookups. "
-            "Query counts still accumulate normally. Useful for verifying "
-            "mechanism logic without spending tokens."
+            "Deprecated compatibility alias for "
+            "--person-query-mode deterministic. Deterministic queries are "
+            "already the default."
         ),
     )
     parser.add_argument("--timeout", type=float, default=60.0)
     parser.add_argument("--max-parse-retries", type=int, default=1)
     parser.add_argument(
+        "--interest-map-failure-policy",
+        choices=["raise", "all_items"],
+        default="raise",
+        help=(
+            "Behaviour after all interest-map parse attempts fail. 'raise' "
+            "(default) aborts the run; 'all_items' is a degraded debugging-only fallback."
+        ),
+    )
+    parser.add_argument(
+        "--llm-cache-mode",
+        choices=["off", "read-write", "read-only", "refresh"],
+        default="off",
+        help=(
+            "LLM response cache mode (see README.md, 'Frozen elicitation and "
+            "caching'). 'off': never "
+            "read/write the cache. 'read-write': reuse a cached response if "
+            "present, otherwise call the provider and cache it. 'read-only': "
+            "require a cached response, raising CacheMissError on a miss "
+            "instead of calling the provider. 'refresh': always call the "
+            "provider and overwrite the cache entry."
+        ),
+    )
+    parser.add_argument(
+        "--llm-cache-path",
+        type=str,
+        default=DEFAULT_CACHE_PATH,
+        help="Path to the SQLite LLM response cache file.",
+    )
+    parser.add_argument(
         "--log-dir",
         default="outputs/llm_runs/curated_batch",
     )
-    parser.add_argument("--epsilon", type=float, default=1.0)
-    parser.add_argument("--discount-inferred", action="store_true")
+    parser.add_argument(
+        "--elicitation-pack",
+        type=Path,
+        default=None,
+        help=(
+            "Replay a previously frozen initial-elicitation pack. The "
+            "opening question/answer, interest map, candidate bundles, and "
+            "raw PV values are loaded without initial LLM calls."
+        ),
+    )
+    parser.add_argument(
+        "--disclosure-pack",
+        type=Path,
+        default=None,
+        help=(
+            "Reuse only the opening question/person answers from a frozen "
+            "pack, then regenerate interest maps and raw PVs with the current "
+            "--proxy-provider/--proxy-model. Intended for model-portability "
+            "validation; combine with --write-elicitation-pack."
+        ),
+    )
+    parser.add_argument(
+        "--write-elicitation-pack",
+        type=Path,
+        default=None,
+        help=(
+            "After live initial elicitation, validate and write a frozen "
+            "pack containing raw, uncalibrated PV values and generation "
+            "provenance."
+        ),
+    )
+    parser.add_argument(
+        "--prepare-elicitation-only",
+        action="store_true",
+        help=(
+            "Generate/validate --write-elicitation-pack and skip auction "
+            "mechanisms. Requires --write-elicitation-pack."
+        ),
+    )
+    parser.add_argument(
+        "--pv-calibration-config",
+        type=Path,
+        default=None,
+        help=(
+            "Preferred way to calibrate raw LLM-inferred provisional values. "
+            "Path to a calibration JSON "
+            '{"schema_version":"1","family":"none|uniform|exponential",'
+            '"scale":1.0,"size_gamma":1.0,"size_threshold":3,'
+            '"budget_cap":true}. calibrated = scale * raw * size_gamma ** '
+            "max(0, |B| - size_threshold), then capped at the bidder's "
+            "disclosed budget when budget_cap is set. scale may exceed 1. "
+            "Omitted (the default) means raw, uncalibrated provisional "
+            "values. Produce a fitted config with "
+            "scripts/fit_pv_calibration.py. Cannot be combined with the "
+            "deprecated flags below."
+        ),
+    )
+    parser.add_argument(
+        "--epsilon",
+        type=float,
+        default=1.0,
+        help=(
+            "DEPRECATED (use --pv-calibration-config): multiplicative "
+            "discount in (0, 1] applied to inferred values. Requires "
+            "--discount-inferred; supplying it alone is now an error rather "
+            "than a silent no-op."
+        ),
+    )
+    parser.add_argument(
+        "--discount-inferred",
+        action="store_true",
+        help=(
+            "DEPRECATED (use --pv-calibration-config): enable the legacy "
+            "epsilon/size-discount calibration."
+        ),
+    )
+    parser.add_argument(
+        "--size-discount-family",
+        choices=["exponential"],
+        default=None,
+        help=(
+            "DEPRECATED (use --pv-calibration-config): bundle-size-dependent "
+            "discount applied on top of --epsilon (requires "
+            "--discount-inferred). Only 'exponential' is supported: "
+            "adjusted = raw_value * epsilon * size_discount_gamma ** "
+            "max(0, bundle_size - size_discount_k0)."
+        ),
+    )
+    parser.add_argument(
+        "--size-discount-k0",
+        type=int,
+        default=3,
+        help=(
+            "DEPRECATED (use --pv-calibration-config): bundle size below/at "
+            "which the exponential size discount leaves values unchanged."
+        ),
+    )
+    parser.add_argument(
+        "--size-discount-gamma",
+        type=float,
+        default=1.0,
+        help=(
+            "DEPRECATED (use --pv-calibration-config): exponential "
+            "size-discount factor (must be > 0)."
+        ),
+    )
     parser.add_argument("--disable-anchor-values", action="store_true")
     parser.add_argument("--max-bundle-size", type=int, default=2)
     parser.add_argument("--top-k", type=int, nargs="+", default=[1])
@@ -145,73 +460,311 @@ def parse_args() -> argparse.Namespace:
         default=100.0,
     )
     parser.add_argument(
+        "--clock-refine-top-k-frontier",
+        action="store_true",
+        help=(
+            "For the elicited proxy clock, issue one deduplicated deterministic "
+            "value query whenever a bundle newly enters a bidder's positive-"
+            "surplus top-k demand frontier. Compatibility alias for "
+            "--clock-top-k-frontier-policy all."
+        ),
+    )
+    parser.add_argument(
+        "--clock-top-k-frontier-policy",
+        choices=["off", "all", "allocation_pivotal"],
+        default="off",
+        help=(
+            "Clock treatment for newly seen positive-surplus top-k bundles. "
+            "'allocation_pivotal' queries only bundles whose reported forced-"
+            "allocation welfare gap is within --clock-tie-threshold."
+        ),
+    )
+    parser.add_argument(
+        "--clock-allocation-counterfactual-frontier",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help=(
+            "At the initial supplementary WDP allocation and after allocation "
+            "changes, query a bounded frontier exposed by removing incumbent "
+            "winning atoms."
+        ),
+    )
+    parser.add_argument(
+        "--event-policy",
+        choices=EVENT_POLICIES,
+        default="custom",
+        help=(
+            "Resolved elicitation-event specification. 'custom' preserves "
+            "the granular --event-* and mechanism flags. 'recommended' "
+            "enables incumbent/counterfactual verification and scarcity "
+            "fallbacks for both mechanisms, plus sealed-only large-correction "
+            "follow-up. 'final-v1' freezes that sealed policy and uses the "
+            "clock-specific targeted-v1 framework. 'final-v2' preserves the "
+            "sealed policy and uses frozen clock-revealed single-pass VCG "
+            "witness verification. 'final-v3' preserves the sealed policy "
+            "and uses revealed-witness/winner sandwich closure."
+        ),
+    )
+    parser.add_argument(
+        "--clock-event-framework",
+        choices=["legacy", "targeted_v1", "native_v1", "frontier_v1"],
+        default="legacy",
+        help="Clock event-generation architecture used by custom policies.",
+    )
+    parser.add_argument(
+        "--clock-native-near-zero-surplus",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Enable the original near-dropout surplus value-query event.",
+    )
+    parser.add_argument(
+        "--clock-native-demand-changed",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Enable the original abandoned-demand value-query event.",
+    )
+    parser.add_argument(
+        "--clock-native-near-tie",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Enable the original close runner-up value-query event.",
+    )
+    parser.add_argument(
+        "--clock-frontier-winner-verification",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help="Verify bundles in the terminal clock allocation.",
+    )
+    parser.add_argument(
+        "--clock-frontier-pivotal-challengers",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help=(
+            "Verify one close, overlapping clock-revealed losing demand per "
+            "terminal winning bundle."
+        ),
+    )
+    parser.add_argument(
+        "--clock-frontier-winner-closure",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help="Verify newly allocated bundles until all final winners are exact.",
+    )
+    parser.add_argument(
+        "--clock-frontier-vcg-witness-verification",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help="Additionally close the terminal bidder-removal VCG frontier.",
+    )
+    parser.add_argument(
+        "--clock-frontier-vcg-single-pass",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help=(
+            "Query only the bidder-removal witnesses frozen before any "
+            "terminal correction, then recompute once without closure."
+        ),
+    )
+    parser.add_argument(
+        "--clock-frontier-vcg-revealed-only",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help=(
+            "In single-pass mode, retain only witness bundles observed on "
+            "the top-k clock demand path."
+        ),
+    )
+    parser.add_argument(
+        "--clock-frontier-staged-revealed-vcg-closure",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help=(
+            "After terminal winner closure, iteratively verify clock-revealed "
+            "VCG witnesses and close any newly exposed winners."
+        ),
+    )
+    parser.add_argument(
+        "--clock-supplementary-support-policy",
+        choices=["all_atoms", "demand_revealed"],
+        default="all_atoms",
+        help=(
+            "Bundles admitted to supplementary WDP/VCG support: the full "
+            "proxy candidate bid (historical behavior), or only top-k "
+            "positive-surplus bundles revealed along the clock path."
+        ),
+    )
+    parser.add_argument(
+        "--clock-event-demand-switch-verification",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help="Query newly entered and abandoned primary demand bundles.",
+    )
+    parser.add_argument(
+        "--clock-event-contested-bundle-refinement",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help=(
+            "Query at most one positive-surplus contested alternative per "
+            "bidder during the clock."
+        ),
+    )
+    parser.add_argument(
+        "--clock-event-terminal-winner-verification",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+    )
+    parser.add_argument(
+        "--clock-event-terminal-vcg-witness-verification",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+    )
+    parser.add_argument(
+        "--clock-event-terminal-best-losing-challenger",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+    )
+    parser.add_argument(
+        "--clock-event-terminal-stability-audit",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help=(
+            "Independently enable the legacy terminal supplementary-WDP "
+            "stability audit. If omitted, it follows incumbent verification."
+        ),
+    )
+    parser.add_argument(
+        "--event-incumbent-verification",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help=(
+            "Verify bundles selected by the current reported allocation. "
+            "Enabled by default; use --no-event-incumbent-verification only "
+            "for an event-policy ablation."
+        ),
+    )
+    parser.add_argument(
+        "--event-pivotal-challengers",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help=(
+            "Query a bounded exact forced-allocation challenger frontier."
+        ),
+    )
+    parser.add_argument(
+        "--event-pivotal-gap-threshold",
+        type=float,
+        default=100.0,
+        help=(
+            "Maximum absolute reported-welfare gap for a pivotal challenger."
+        ),
+    )
+    parser.add_argument(
+        "--event-scarcity-fallbacks",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help=(
+            "Query high-ranked alternatives that use fewer contested goods."
+        ),
+    )
+    parser.add_argument(
+        "--event-large-correction-followup",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help=(
+            "After a large exact correction, query one nearby candidate "
+            "bundle; the follow-up is non-recursive."
+        ),
+    )
+    parser.add_argument(
+        "--sealed-event-large-correction-followup",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help=(
+            "Custom-policy override for sealed only. Omit to inherit "
+            "--event-large-correction-followup. Used by focused ablations."
+        ),
+    )
+    parser.add_argument(
+        "--clock-event-large-correction-followup",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help=(
+            "Custom-policy override for clock only. Omit to inherit "
+            "--event-large-correction-followup. Used by focused ablations."
+        ),
+    )
+    parser.add_argument(
+        "--event-correction-threshold",
+        type=float,
+        default=0.25,
+        help=(
+            "Symmetric relative correction required to trigger the one-step "
+            "large-correction follow-up."
+        ),
+    )
+    parser.add_argument(
+        "--event-gate-near-zero-surplus",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help=(
+            "Clock only: retain near-zero-surplus events only when their "
+            "bundle touches a good contested in the preceding round."
+        ),
+    )
+    parser.add_argument(
+        "--event-terminal-regret-audit",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help=(
+            "Before finalization, query the closest remaining reported "
+            "forced-allocation challenger."
+        ),
+    )
+    parser.add_argument(
         "--max-refinement-queries-per-bidder",
         type=int,
         default=0,
-        help="Cap on refinement queries per bidder. 0 means unlimited.",
-    )
-    parser.add_argument(
-        "--elicited-ceca",
-        action="store_true",
         help=(
-            "Run the CECA (Competitive Equilibrium Combinatorial Auction) "
-            "proxy-mediated arm: iterative Lindahl-style personalized "
-            "bundle pricing until every bidder is simultaneously satisfied."
+            "Safety cap on refinement queries per bidder for the proxy "
+            "sealed/clock elicited arms (--sealed-elicitation-rounds, "
+            "--elicited-clock). 0 means unlimited. Refinement count is "
+            "meant to be an outcome of the elicitation events and mechanism, "
+            "not a tuning target -- this and --max-total-refinement-queries "
+            "should normally be left high enough not to bind. Value/demand queries are "
+            "already deduplicated per bidder/bundle regardless of this cap."
         ),
     )
     parser.add_argument(
-        "--ceca-max-rounds",
+        "--max-total-refinement-queries",
         type=int,
-        default=50,
-    )
-    parser.add_argument(
-        "--ceca-proxy-type",
-        choices=["llm", "dnf", "vd1", "vd2", "nvd"],
-        default="llm",
+        default=0,
         help=(
-            "Proxy implementation for the --elicited-ceca arm: "
-            "'llm' (default) uses the modular LLM proxy (LlmAuctionProxyAdapter / "
-            "LlmInferredXorProxy), the primary cross-mechanism architecture -- "
-            "controlled by --proxy-type, --use-interest-map, and "
-            "--use-provisional-valuations; "
-            "'dnf' uses the non-LLM proper-learning baseline (ωxor); "
-            "'vd1', 'vd2', 'nvd' are legacy CECA-specific literature baselines "
-            "(ωvd1/ωvd2/ωnvd) kept for comparison -- they require --provider and "
-            "--model for a separate proxy LLM client."
-        ),
-    )
-    parser.add_argument(
-        "--gamma-refresh-every",
-        type=int,
-        default=1,
-        help=(
-            "ωvd2/ωnvd: refresh γ estimates every N CECA rounds (1 = every round, "
-            "0 = disabled after the initial seed). Ignored for vd1/dnf."
-        ),
-    )
-    parser.add_argument(
-        "--nvd-num-questions",
-        type=int,
-        default=1,
-        help="ωnvd: number of NL preference questions to ask before the CECA loop.",
-    )
-    parser.add_argument(
-        "--ceca-payment-rule",
-        choices=["pay_as_bid", "vcg", "both"],
-        default="pay_as_bid",
-        help=(
-            "'pay_as_bid' is the faithful CECA rule (pay your own reported "
-            "value for what you win); 'vcg' computes Clarke-pivot payments "
-            "over the same final allocation for comparison; 'both' runs the "
-            "round loop once and finalizes both ways. CECA internal "
-            "elicitation always uses Lindahl-style prices regardless of "
-            "this setting."
+            "Safety cap on refinement queries summed across all bidders, "
+            "for the same proxy sealed/clock elicited arms. 0 means "
+            "unlimited. A global backstop against runaway query volume, "
+            "independent of --max-refinement-queries-per-bidder."
         ),
     )
     parser.add_argument(
         "--sealed-elicitation-rounds",
         type=int,
         default=0,
+        help=(
+            "Number of sealed refinement rounds. With "
+            "--sealed-stopping-rule fixed_rounds this is exact; with "
+            "no_new_refinements it is the maximum-round safety cap."
+        ),
+    )
+    parser.add_argument(
+        "--sealed-stopping-rule",
+        choices=["fixed_rounds", "no_new_refinements"],
+        default="fixed_rounds",
+        help=(
+            "fixed_rounds (default) always runs the requested number of "
+            "sealed rounds. no_new_refinements stops after the first "
+            "completed round that produces zero new refinement queries; "
+            "--sealed-elicitation-rounds remains the maximum."
+        ),
     )
     parser.add_argument(
         "--sealed-feedback-rule",
@@ -224,6 +777,181 @@ def parse_args() -> argparse.Namespace:
             "all_valued_bundles",
         ],
         default="none",
+    )
+    parser.add_argument(
+        "--sealed-loser-challenger-policy",
+        choices=["off", "shadow_price"],
+        default="off",
+        help=(
+            "For competitive sealed feedback, optionally add one independent "
+            "shadow-price challenger for each reported loser. 'off' keeps "
+            "only allocated and winner-removal counterfactual bundles."
+        ),
+    )
+    parser.add_argument(
+        "--no-sealed-trajectory",
+        dest="sealed_trajectory",
+        action="store_false",
+        default=True,
+        help=(
+            "Disable per-round trajectory recording for the proxy sealed "
+            "arm. By default, whenever --sealed-elicitation-rounds > 0, "
+            "results are recorded after every round (0..R) using the same "
+            "proxy state, and written to "
+            "curated_proxy_sealed_trajectory.csv. The final round is "
+            "always used as the proxy sealed result/CSV row, so this flag "
+            "only affects whether the per-round trajectory is captured."
+        ),
+    )
+    parser.add_argument(
+        "--no-clock-trajectory",
+        dest="clock_trajectory",
+        action="store_false",
+        default=True,
+        help=(
+            "Disable per-round diagnostic trajectory recording for the "
+            "proxy clock arm. By default, whenever --elicited-clock is set, "
+            "every clock round (for each --top-k value) is recorded to "
+            "curated_proxy_clock_rounds_top_{k}.csv, "
+            "curated_proxy_clock_bidder_rounds_top_{k}.csv, "
+            "curated_proxy_clock_coverage_top_{k}.csv, and "
+            "curated_proxy_clock_event_usefulness_top_{k}.csv. The final "
+            "round is always used as the proxy clock result/CSV row, so "
+            "this flag only affects whether the per-round diagnostics are "
+            "captured."
+        ),
+    )
+    parser.add_argument(
+        "--late-reflection",
+        action="store_true",
+        help=(
+            "Enable the late_reflection elicitation event: a targeted NL "
+            "check-in built from accumulated auction context, fired once "
+            "before the final sealed round (--sealed-elicitation-rounds) "
+            "and/or once when the clock nears clearing "
+            "(--late-reflection-near-clearing-threshold), for the proxy "
+            "sealed/clock arms only. Disabled by default. Recommended "
+            "treatment: --late-reflection-scope allocation_marginal "
+            "--late-reflection-max-bidders 3 --late-reflection-followup "
+            "mechanism_default --late-reflection-followups-per-bidder 1 "
+            "--late-reflection-max-tokens 1000."
+        ),
+    )
+    parser.add_argument(
+        "--late-reflection-scope",
+        choices=["allocation_relevant", "all_bidders", "allocation_marginal"],
+        default="allocation_relevant",
+        help=(
+            "Which bidders get a late_reflection question. "
+            "'allocation_marginal' (recommended): scores every bidder by "
+            "deterministic marginality signals (currently allocated / "
+            "allocation changed last round / near-top losing bundle / "
+            "large bundle contesting an allocated good / recent clock "
+            "near_tie-near_zero_surplus-demand_changed / current demand on "
+            "a contested or positive-excess-demand good), then queries only "
+            "the top --late-reflection-max-bidders scorers -- see "
+            "auctionlab.llm.late_reflection.sealed_marginality_scores/"
+            "clock_marginality_scores. Avoids the 'allocation_relevant' "
+            "problem: under a broad sealed feedback rule like "
+            "all_provisional, almost every bidder receives allocated_bundle "
+            "or lost_interested_bundle feedback, so allocation_relevant "
+            "effectively asks everyone -- a live 10x10 run showed this made "
+            "late reflection a net-negative broad revaluation sweep rather "
+            "than a targeted elicitation event. 'allocation_relevant' "
+            "(default, kept for backward compatibility): sealed bidders who "
+            "receive pre-final-round sealed feedback, or clock bidders with "
+            "a recent local clock event / demand touching a contested good "
+            "-- unbounded, binary in/out. 'all_bidders': every bidder (for "
+            "testing/robustness)."
+        ),
+    )
+    parser.add_argument(
+        "--late-reflection-max-bidders",
+        type=int,
+        default=None,
+        help=(
+            "Only consulted when --late-reflection-scope allocation_marginal: "
+            "cap on how many top-scoring marginal bidders get queried, "
+            "after ranking by descending marginality score (bidder_id "
+            "tie-break). None/omitted (default) means no cap -- every "
+            "positive-score bidder is selected. 0 caps at zero bidders "
+            "(selects nobody); this is NOT the 0-means-unlimited convention "
+            "used by some other flags in this project -- None is 'no cap' "
+            "here. Recommended: 3 or 4. Negative values are rejected."
+        ),
+    )
+    parser.add_argument(
+        "--late-reflection-followup",
+        choices=["none", "value_query", "demand_query", "mechanism_default"],
+        default="mechanism_default",
+        help=(
+            "Follow-up query type after a late_reflection answer. "
+            "'mechanism_default' (default): value_query for BOTH sealed and "
+            "clock -- the reflection question is now always framed as an "
+            "explicit pairwise/marginal comparison, so a direct value_query "
+            "over the comparison pair tests it precisely; a live 10x10 run "
+            "showed a late demand_query near clock clearing mostly just "
+            "confirmed current demand without improving pricing error. "
+            "Pass 'demand_query' explicitly to opt back into a "
+            "price-conditioned satisfaction check. The LLM's own "
+            "suggested_followup is always logged but never overrides this "
+            "flag."
+        ),
+    )
+    parser.add_argument(
+        "--late-reflection-followups-per-bidder",
+        type=int,
+        default=1,
+        help=(
+            "Cap on follow-up VQ/DQ bundles per bidder per late_reflection "
+            "trigger. Recommended: 1, paired with "
+            "--late-reflection-scope allocation_marginal and "
+            "--late-reflection-max-bidders -- one targeted NL question plus "
+            "one targeted value query for only the highest-ranked "
+            "allocation-marginal bidders. A wider follow-up budget (2) is "
+            "still fully supported and populates the pairwise "
+            "pricing-error columns in curated_late_reflection_records.csv, "
+            "but combined with a broad scope it turned late reflection into "
+            "a net-negative broad revaluation sweep in a live 10x10 run --  "
+            "prefer narrowing the scope (allocation_marginal + "
+            "--late-reflection-max-bidders) over widening the follow-up "
+            "budget."
+        ),
+    )
+    parser.add_argument(
+        "--late-reflection-near-clearing-threshold",
+        type=int,
+        default=2,
+        help=(
+            "Clock only: fire late_reflection the first round where total "
+            "positive excess demand (sum of max(0, excess_demand_g) over "
+            "goods) drops to or below this value."
+        ),
+    )
+    parser.add_argument(
+        "--late-reflection-recent-window-rounds",
+        type=int,
+        default=3,
+        help=(
+            "Clock only: number of trailing rounds (including the "
+            "triggering round) used for the allocation_relevant/"
+            "allocation_marginal scopes' 'recent local clock event' / "
+            "'recently contested good' checks."
+        ),
+    )
+    parser.add_argument(
+        "--late-reflection-max-tokens",
+        type=int,
+        default=1000,
+        help=(
+            "max_tokens for the late_reflection question-generation call "
+            "only -- built as a separate client from --max-tokens (the "
+            "shared value/demand-query budget). A live 10x10 run truncated "
+            "the pairwise reflection JSON at ~296 output tokens under the "
+            "default --max-tokens=300, causing every late-reflection row to "
+            "fail to parse; this gives the larger, more verbose pairwise "
+            "schema response its own budget."
+        ),
     )
     parser.add_argument(
         "--skip-baselines",
@@ -245,7 +973,8 @@ def parse_args() -> argparse.Namespace:
         type=int,
         default=8,
         help=(
-            "Number of PC goods for --scenario pc_build (4–10). "
+            "Number of PC goods for --scenario pc_build (at least 4 and no "
+            "more than the selected scenario spec contains). "
             "Ignored when --scenario names a specific scenario."
         ),
     )
@@ -254,7 +983,8 @@ def parse_args() -> argparse.Namespace:
         type=int,
         default=8,
         help=(
-            "Number of bidder archetypes for --scenario pc_build (3–10). "
+            "Number of bidder archetypes for --scenario pc_build (at least "
+            "3 and no more than the selected scenario spec contains). "
             "Ignored when --scenario names a specific scenario."
         ),
     )
@@ -262,14 +992,65 @@ def parse_args() -> argparse.Namespace:
         "--scenario-seed",
         type=int,
         default=0,
-        help="Random seed for structured scenario jitter (--scenario pc_build).",
+        help=(
+            "Scenario selection seed. With --scenario-spec it is used by "
+            "--selection-policy seeded_sample/stratified/coverage_stratified; "
+            "prefix ignores it."
+        ),
+    )
+    parser.add_argument(
+        "--selection-policy",
+        choices=[
+            "prefix",
+            "seeded_sample",
+            "stratified",
+            "coverage_stratified",
+        ],
+        default="prefix",
+        help=(
+            "How a spec selects goods and bidders. prefix preserves legacy "
+            "declaration order; seeded_sample and stratified produce nested, "
+            "seed-dependent subsets; coverage_stratified additionally rejects "
+            "nested orders that fail sample-level interest/group constraints."
+        ),
+    )
+    parser.add_argument(
+        "--scenario-spec",
+        type=str,
+        default=None,
+        help=(
+            "Path to a ScenarioProfileSpec JSON file, normally the current "
+            "validated population under scenarios/pc_build_v2/. "
+            "When set together with --scenario pc_build, builds the scenario via "
+            "make_pc_build_scenario_from_spec instead of the hard-coded archetype "
+            "builders."
+        ),
     )
     parser.add_argument(
         "--ask-initial-question",
         action="store_true",
         help=(
-            "ωnvd: ask each bidder one open-ended NL question up front and "
-            "fold the answer into all later value inference."
+            "ωnvd: deliver the scenario-level opening question to each bidder "
+            "and fold the answer into all later value inference."
+        ),
+    )
+    parser.add_argument(
+        "--opening-question-policy",
+        choices=["canonical", "proxy_generated"],
+        default="canonical",
+        help=(
+            "canonical (default) reuses one versioned scenario-level question "
+            "without an LLM generation call. proxy_generated asks the proxy "
+            "model to generate one question for the selected catalogue and "
+            "reuses it across all bidders."
+        ),
+    )
+    parser.add_argument(
+        "--opening-question",
+        default=None,
+        help=(
+            "Explicit scenario-level opening question. Overrides "
+            "--opening-question-policy and is reused across all bidders."
         ),
     )
     parser.add_argument(
@@ -289,11 +1070,9 @@ def parse_args() -> argparse.Namespace:
         help=(
             "Proxy implementation used for elicited proxy-mediated runs "
             "(--elicited-clock / --sealed-elicitation-rounds): 'llm' is the "
-            "NL-and-inference proxy (ωnvd/ωvd), 'dnf' is the non-LLM "
-            "proper-learning baseline (ωxor), 'hybrid' is ωh (ωnvd/ωvd for "
-            "the first --hybrid-alpha refinements, then ωxor). --elicited-ceca "
-            "requires 'llm' -- 'dnf'/'hybrid' proxies don't implement "
-            "ceca_step."
+            "NL-and-inference proxy, 'dnf' is the non-LLM "
+            "proper-learning baseline (ωxor), 'hybrid' is ωh (LLM proxy for "
+            "the first --hybrid-alpha refinements, then ωxor)."
         ),
     )
     parser.add_argument(
@@ -326,10 +1105,15 @@ def parse_args() -> argparse.Namespace:
         type=int,
         default=None,
         help=(
-            "Cap the number of candidate bundles per bidder after interest-map "
-            "filtering (priority order: complementary groups first, then "
-            "singletons, then remaining bundles by ascending size). Pass None "
-            "for a full uncapped run. Ignored unless --use-interest-map is set."
+            "Cap the number of candidate bundles per bidder, applied both after "
+            "interest-map filtering and again (redundantly, if it's already <= "
+            "this cap) before the provisional-valuation LLM call (priority order: "
+            "complementary groups first, then singletons, then remaining bundles "
+            "by ascending size). Omit for a full, uncapped run at both stages -- "
+            "there is no automatic token-budget-derived truncation; a large "
+            "candidate count only produces an informational warning suggesting "
+            "--pv-max-tokens or this flag, never a silent reduction. Ignored "
+            "unless --use-interest-map is set."
         ),
     )
     parser.add_argument(
@@ -363,114 +1147,43 @@ def parse_args() -> argparse.Namespace:
         ),
     )
     parser.add_argument(
-        "--ceca-no-pv",
-        action="store_true",
-        help=(
-            "Build the CECA proxy arm from the shared NL+interest-map "
-            "elicitation but WITHOUT replaying provisional valuations. This "
-            "prevents CECA from converging in round 1 due to PV-initialized "
-            "bids that already form a competitive equilibrium."
-        ),
-    )
-    parser.add_argument(
-        "--ceca-initial-bid-mode",
-        nargs="+",
-        choices=["full_proxy", "singletons", "empty"],
-        default=["full_proxy"],
-        help=(
-            "How to seed the CECA manifest from the proxy's current XOR bid. "
-            "Accepts one or more values to run multiple CECA arms in one pass. "
-            "'full_proxy' (labelled 'prior'): seed from the full bid — tests the "
-            "proxy prior quality; tends to converge in one round. "
-            "'singletons': seed only singleton atoms; complement bundles must be "
-            "discovered through CECA's demand/satisfaction loop — isolates CECA's "
-            "iterative value from the prior. "
-            "'empty': seed with no atoms — stress-test mode. "
-            "Example: --ceca-initial-bid-mode full_proxy singletons"
-        ),
-    )
-    parser.add_argument(
-        "--ceca-atomic-trimming",
-        action="store_true",
-        default=True,
-        dest="ceca_atomic_trimming",
-        help="Enable CECA atomic trimming (default: on).",
-    )
-    parser.add_argument(
-        "--no-ceca-atomic-trimming",
-        action="store_false",
-        dest="ceca_atomic_trimming",
-        help="Disable CECA atomic trimming.",
-    )
-    parser.add_argument(
-        "--ceca-trim-value-tolerance",
-        type=float,
-        default=0.0,
-        help=(
-            "Tolerance for atomic trimming: remove item if "
-            "abs(reduced_value - demanded_value) <= tol. Default: 0.0."
-        ),
-    )
-    parser.add_argument(
-        "--ceca-stop-on-no-new-information",
-        action="store_true",
-        default=False,
-        dest="ceca_stop_on_no_new_information",
-        help=(
-            "Stop CECA early if K consecutive rounds produce no new manifest atoms."
-        ),
-    )
-    parser.add_argument(
-        "--ceca-stall-patience",
+        "--pv-chunk-size",
         type=int,
-        default=1,
-        dest="ceca_stall_patience",
+        default=0,
         help=(
-            "Number of consecutive stall rounds before stopping "
-            "(requires --ceca-stop-on-no-new-information). Default: 1."
+            "Split a bidder's candidate bundles into deterministic chunks of "
+            "at most this size, calling the provisional-valuation LLM once "
+            "per chunk and merging the results into one PV table -- see "
+            "README.md, 'Provisional valuations'. 0 (default) disables "
+            "chunking: one bulk PV call over every candidate bundle, exactly "
+            "as before this flag existed. PV chunks are counted as PV/"
+            "shared-initial elicitation calls, never as value queries -- "
+            "chunking never changes VQ/refinement counts. Recommended for "
+            "8x8+ live runs with a large interest-map candidate set: try 50, "
+            "alongside a higher --pv-max-tokens (e.g. 12000)."
         ),
     )
     parser.add_argument(
-        "--ceca-stop-on-round-with-no-useful-counterexamples",
-        action="store_true",
-        default=False,
-        dest="ceca_stop_on_round_no_useful_counterexamples",
+        "--pv-failure-policy",
+        choices=["raise", "zero"],
+        default="raise",
         help=(
-            "Stop CECA immediately after the first round in which every unsatisfied "
-            "bidder's demand trims to an atom already in the manifest (no new info). "
-            "Stronger than --ceca-stop-on-no-new-information with patience=1."
-        ),
-    )
-    parser.add_argument(
-        "--ceca-exhaust-repeated-bidders",
-        action="store_true",
-        default=False,
-        dest="ceca_exhaust_repeated_bidders",
-        help=(
-            "Skip demand queries for bidders that return the same trimmed atom "
-            "--ceca-bidder-stall-patience consecutive times while their allocation is unchanged."
-        ),
-    )
-    parser.add_argument(
-        "--ceca-bidder-stall-patience",
-        type=int,
-        default=3,
-        dest="ceca_bidder_stall_patience",
-        help="Consecutive same-trimmed-atom count before skipping a bidder (default: 3).",
-    )
-    parser.add_argument(
-        "--ceca-demand-universe",
-        type=str,
-        default="all_items",
-        dest="ceca_demand_universe",
-        choices=["all_items", "interested_items", "candidate_bundles", "manifest_plus_candidates"],
-        help=(
-            "Constrain CECA demand queries to this bundle universe. "
-            "'all_items': current behaviour (no constraint). "
-            "'interested_items': subsets of each bidder's interest-map items. "
-            "'candidate_bundles': bidder's pre-CECA candidate atoms only. "
-            "'manifest_plus_candidates': union of candidates and current manifest atoms. "
-            "(default: all_items)"
+            "What happens when provisional-valuation generation fails for a "
+            "bidder (after chunk/parse retries are exhausted). 'raise' "
+            "(default, recommended for live experiments): abort the run "
+            "immediately with a diagnostic error naming the bidder, "
+            "candidate count, --pv-chunk-size, --pv-max-tokens, and the "
+            "original exception -- PV failure must never silently degrade "
+            "into a mass direct-value-query fallback, which would swap the "
+            "elicitation regime from bulk provisional valuation to mass "
+            "direct querying and contaminate VQ counts / mechanism "
+            "comparison. 'zero': previous debugging behaviour -- initialise "
+            "that bidder's candidate bundles at 0.0 and continue, marking "
+            "the bidder as degraded in logs/summary. Even under 'zero', PV "
+            "failure never triggers direct value queries over the full "
+            "candidate support -- mechanism-triggered refinement caps "
+            "(--max-refinement-queries-per-bidder etc.) remain the only "
+            "source of post-initialisation value queries."
         ),
     )
     parser.add_argument(
@@ -495,7 +1208,7 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def make_live_client(
+def _build_raw_live_client(
     *,
     model: str,
     provider: str,
@@ -536,6 +1249,31 @@ def make_live_client(
             timeout=timeout,
         )
 
+    if provider == "openai":
+        return OpenAICompatibleLlmClient.for_openai(
+            model=model,
+            base_url=base_url or "https://api.openai.com/v1",
+            api_key=api_key,
+            # GPT-5 reasoning models accept only their default sampling
+            # temperature. Omit the parameter for the whole GPT-5 family,
+            # including current Sol/Terra/Luna variants.
+            temperature=effective_model_temperature(
+                provider, model, temperature
+            ),
+            max_tokens=max_tokens,
+            timeout=timeout,
+        )
+
+    if provider == "anthropic":
+        return OpenAICompatibleLlmClient.for_anthropic(
+            model=model,
+            base_url=base_url or "https://api.anthropic.com/v1/",
+            api_key=api_key,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            timeout=timeout,
+        )
+
     return OpenAICompatibleLlmClient(
         model=model,
         base_url=base_url,
@@ -544,6 +1282,118 @@ def make_live_client(
         max_tokens=max_tokens,
         timeout=timeout,
     )
+
+
+def effective_model_temperature(
+    provider: str | None,
+    model: str | None,
+    requested_temperature: float | None,
+) -> float | None:
+    """Return the sampling temperature actually sent to the provider."""
+    if (
+        provider == "openai"
+        and model is not None
+        and model.startswith("gpt-5")
+    ):
+        return None
+    if (
+        provider == "gemini"
+        and model is not None
+        and model.startswith(("gemini-3.5-", "gemini-3.6-"))
+    ):
+        return None
+    return requested_temperature
+
+
+def resolve_llm_role_args(args: argparse.Namespace) -> argparse.Namespace:
+    """Resolve person/proxy overrides against the legacy global defaults."""
+    for role in ("person", "proxy"):
+        for field in (
+            "provider",
+            "model",
+            "base_url",
+            "api_key",
+            "temperature",
+        ):
+            role_field = f"{role}_{field}"
+            if getattr(args, role_field, None) is None:
+                setattr(args, role_field, getattr(args, field))
+    return args
+
+
+def resolve_person_query_mode(args: argparse.Namespace) -> argparse.Namespace:
+    """Resolve the deprecated GT flag into the effective person-query mode."""
+    if getattr(args, "ground_truth_queries", False):
+        args.person_query_mode = "deterministic"
+    args.ground_truth_queries = args.person_query_mode == "deterministic"
+    return args
+
+
+def resolve_initial_elicitation_flags(
+    args: argparse.Namespace,
+) -> argparse.Namespace:
+    """Apply the documented implications before validation/config output."""
+    if args.use_provisional_valuations:
+        args.use_interest_map = True
+    if args.use_interest_map:
+        args.ask_initial_question = True
+    return args
+
+
+def make_live_client(
+    *,
+    model: str,
+    provider: str,
+    base_url: str | None,
+    api_key: str | None,
+    temperature: float,
+    max_tokens: int,
+    timeout: float,
+    cache: LlmResponseCache | None = None,
+    cache_mode: str = "off",
+    cache_stats: CacheStats | None = None,
+    llm_role: str | None = None,
+) -> OpenAICompatibleLlmClient | CachingLlmClient:
+    """Build the live provider client, optionally wrapped with LLM caching.
+
+    When ``cache`` is given and ``cache_mode != "off"``, the returned client
+    is a :class:`~auctionlab.llm.cache.CachingLlmClient` -- callers that pass
+    per-call cache context (see :func:`~auctionlab.llm.cache.call_client`,
+    used by ``LlmPersonSimulator``/``derive_interest_map``/
+    ``generate_provisional_valuations``) get full caching; any other caller
+    still gets correct (if less richly indexed) caching keyed on prompt
+    text, provider, and model alone.
+    """
+    raw_client = _build_raw_live_client(
+        model=model,
+        provider=provider,
+        base_url=base_url,
+        api_key=api_key,
+        temperature=temperature,
+        max_tokens=max_tokens,
+        timeout=timeout,
+    )
+    if cache is None or cache_mode == "off":
+        client = raw_client
+    else:
+        client = CachingLlmClient(
+            inner=raw_client,
+            cache=cache,
+            mode=cache_mode,
+            provider=provider,
+            model=model,
+            temperature=raw_client.temperature,
+            max_tokens=max_tokens,
+            reasoning_effort=raw_client.reasoning_effort,
+            stats=cache_stats if cache_stats is not None else CacheStats(),
+        )
+    # Uniform provenance attributes for raw and caching clients. Logging
+    # call-sites use these rather than assuming every client class exposes a
+    # provider or role field.
+    setattr(client, "_auctionlab_provider", provider)
+    setattr(client, "_auctionlab_model", model)
+    setattr(client, "_auctionlab_llm_role", llm_role)
+    return client
 
 
 def make_live_persons_for_scenario(
@@ -555,15 +1405,52 @@ def make_live_persons_for_scenario(
     api_key: str | None,
     temperature: float,
     max_tokens: int,
+    person_nl_max_tokens: int | None = None,
     timeout: float,
     logger: LlmCallLogger,
     max_parse_retries: int,
     use_ground_truth: bool = False,
     verbose: bool = False,
+    cache: LlmResponseCache | None = None,
+    cache_mode: str = "off",
+    cache_stats: CacheStats | None = None,
+    verifier_provider: str | None = None,
+    verifier_model: str | None = None,
+    verifier_base_url: str | None = None,
+    verifier_api_key: str | None = None,
+    verifier_temperature: float = 0.0,
+    verifier_max_tokens: int = 2000,
 ) -> dict[str, LlmPersonSimulator]:
     persons: dict[str, LlmPersonSimulator] = {}
 
     for bidder_id in scenario.instance.bidder_ids:
+        profile_metadata = (
+            (getattr(scenario, "metadata", {}) or {})
+            .get("profiles", {})
+            .get(bidder_id, {})
+        )
+        available_items = set(scenario.instance.items)
+        if "disclosed_positive_items" in profile_metadata:
+            disclosed_positive_items = (
+                set(profile_metadata["disclosed_positive_items"])
+                & available_items
+            )
+        else:
+            # Compatibility for scenarios created before the explicit
+            # disclosure field existed. Singleton positivity is the same
+            # criterion used by the qualitative seed renderer; classification
+            # lists may also contain zero-valued goods.
+            bidder_valuations = scenario.instance.valuations.get(
+                bidder_id, {}
+            )
+            disclosed_positive_items = {
+                item
+                for item in available_items
+                if bidder_valuations.get(frozenset({item}), 0.0) > 0
+            }
+        expected_interested_items = (
+            disclosed_positive_items if profile_metadata else None
+        )
         persons[bidder_id] = LlmPersonSimulator(
             bidder_id=bidder_id,
             scenario_description=scenario.scenario_description,
@@ -577,35 +1464,196 @@ def make_live_persons_for_scenario(
                 temperature=temperature,
                 max_tokens=max_tokens,
                 timeout=timeout,
+                cache=cache,
+                cache_mode=cache_mode,
+                cache_stats=cache_stats,
+                llm_role="person",
+            ),
+            nl_client=(
+                make_live_client(
+                    model=model,
+                    provider=provider,
+                    base_url=base_url,
+                    api_key=api_key,
+                    temperature=temperature,
+                    max_tokens=person_nl_max_tokens,
+                    timeout=timeout,
+                    cache=cache,
+                    cache_mode=cache_mode,
+                    cache_stats=cache_stats,
+                    llm_role="person",
+                )
+                if person_nl_max_tokens is not None
+                else None
+            ),
+            verifier_client=(
+                make_live_client(
+                    model=verifier_model,
+                    provider=verifier_provider,
+                    base_url=verifier_base_url,
+                    api_key=verifier_api_key,
+                    temperature=verifier_temperature,
+                    max_tokens=verifier_max_tokens,
+                    timeout=timeout,
+                    cache=cache,
+                    cache_mode=cache_mode,
+                    cache_stats=cache_stats,
+                    llm_role="verifier",
+                )
+                if verifier_provider is not None
+                and verifier_model is not None
+                else None
             ),
             logger=logger,
             model_name=model,
+            provider_name=provider,
+            verifier_model_name=verifier_model,
+            verifier_provider_name=verifier_provider,
             max_parse_retries=max_parse_retries,
             ground_truth_valuations=(
                 scenario.instance.valuations[bidder_id] if use_ground_truth else None
             ),
             verbose=verbose,
+            scenario_id=scenario.name,
+            expected_interested_items=expected_interested_items,
+            expected_excluded_items=(
+                set(scenario.instance.items) - expected_interested_items
+                if expected_interested_items is not None
+                else None
+            ),
+            expected_substitute_groups=profile_metadata.get(
+                "substitute_groups", []
+            ),
+            expected_complement_groups=profile_metadata.get(
+                "complement_groups", []
+            ),
+            expected_budget_hint=profile_metadata.get(
+                "disclosed_budget_hint",
+                max(
+                    scenario.instance.valuations.get(bidder_id, {}).values(),
+                    default=0.0,
+                ),
+            ),
         )
 
     return persons
 
 
-@dataclass
-class _BidderElicitationCache:
-    """One bidder's NL question/answer, interest map, and PV results.
+class PvGenerationFailedError(RuntimeError):
+    """Raised when ``--pv-failure-policy raise`` (the default) and
+    provisional-valuation generation fails for a bidder, after chunk/parse
+    retries are exhausted.
 
-    Computed once per scenario and replayed (no LLM calls) into a fresh
-    :class:`LlmInferredXorProxy` for each mechanism arm, so the sealed and
-    clock arms start from an identical informational baseline instead of
-    each re-asking the same NL question and re-running the same bulk PV
-    call independently.
+    Carries enough context (``bidder_id``, ``candidate_count``,
+    ``pv_chunk_size``, ``pv_max_tokens``, and the original exception) to
+    diagnose a live PV failure without reproducing it -- see README.md,
+    "Provisional valuations". Raising
+    here (rather than falling back to zero-bid initialisation, which used to
+    let :class:`~auctionlab.llm.proxies.LlmAuctionProxyAdapter` fall through
+    to a mass direct-value-query pass over every candidate bundle) is what
+    keeps a PV failure from silently switching the elicitation regime from
+    bulk provisional valuation to mass direct querying.
     """
 
-    nl_question: str
-    nl_answer: str
-    interest_map: LlmInterestMap | None
-    candidate_bundles: list
-    raw_pv_values: dict | None
+    def __init__(
+        self,
+        *,
+        bidder_id: str,
+        candidate_count: int,
+        pv_chunk_size: int | None,
+        pv_max_tokens: int | None,
+        original_exception: BaseException,
+    ) -> None:
+        self.bidder_id = bidder_id
+        self.candidate_count = candidate_count
+        self.pv_chunk_size = pv_chunk_size
+        self.pv_max_tokens = pv_max_tokens
+        self.original_exception = original_exception
+        message = (
+            "Provisional valuation generation failed "
+            f"(pv_failure_policy=raise): bidder_id={bidder_id!r}, "
+            f"candidate_count={candidate_count}, pv_chunk_size={pv_chunk_size!r}, "
+            f"pv_max_tokens={pv_max_tokens!r}, original_exception="
+            f"{type(original_exception).__name__}: {original_exception}. "
+            "Suggestion: increase --pv-max-tokens, or set --pv-chunk-size to "
+            "split this bidder's candidate bundles into smaller PV calls. "
+            "(Pass --pv-failure-policy zero to opt into degraded zero-bid "
+            "initialisation instead of aborting -- this still never falls "
+            "back to mass direct value queries.)"
+        )
+        super().__init__(message)
+
+
+def provisional_value_scale_diagnostics(
+    *,
+    scenario: NaturalLanguageAuctionScenario,
+    bidder_id: str,
+    raw_pv_values: dict | None,
+    ratio_threshold: float = 3.0,
+) -> dict[str, object]:
+    """Compare inferred PV scale with hidden truth for diagnostics only.
+
+    Ground truth is never passed to the proxy or used to modify bids. This
+    check only makes severe scale drift visible in experiment logs.
+    """
+    if not raw_pv_values:
+        return {"quality_flags": ()}
+    valuations = getattr(scenario.instance, "valuations", {})
+    ground_truth = valuations.get(bidder_id) if isinstance(valuations, dict) else None
+    if not ground_truth:
+        return {"quality_flags": ()}
+
+    inferred_max = max(float(value) for value in raw_pv_values.values())
+    ground_truth_max = max(
+        (float(value) for value in ground_truth.values()),
+        default=0.0,
+    )
+    inferred_singletons = [
+        float(value)
+        for bundle, value in raw_pv_values.items()
+        if len(bundle) == 1
+    ]
+    ground_truth_singletons = [
+        float(value)
+        for bundle, value in ground_truth.items()
+        if len(bundle) == 1
+    ]
+    inferred_max_singleton = max(inferred_singletons, default=0.0)
+    ground_truth_max_singleton = max(ground_truth_singletons, default=0.0)
+
+    def _ratio(inferred: float, truth: float) -> float | None:
+        if truth > 0:
+            return inferred / truth
+        return None
+
+    max_ratio = _ratio(inferred_max, ground_truth_max)
+    singleton_ratio = _ratio(
+        inferred_max_singleton,
+        ground_truth_max_singleton,
+    )
+    flags: list[str] = []
+    if (
+        (max_ratio is not None and max_ratio >= ratio_threshold)
+        or (ground_truth_max == 0 and inferred_max > 0)
+    ):
+        flags.append("pv_max_value_scale_exceeds_ground_truth")
+    if (
+        (singleton_ratio is not None and singleton_ratio >= ratio_threshold)
+        or (
+            ground_truth_max_singleton == 0
+            and inferred_max_singleton > 0
+        )
+    ):
+        flags.append("pv_singleton_scale_exceeds_ground_truth")
+    return {
+        "quality_flags": tuple(flags),
+        "inferred_max_value": inferred_max,
+        "ground_truth_max_value": ground_truth_max,
+        "max_value_ratio": max_ratio,
+        "inferred_max_singleton": inferred_max_singleton,
+        "ground_truth_max_singleton": ground_truth_max_singleton,
+        "max_singleton_ratio": singleton_ratio,
+    }
 
 
 def compute_elicitation_cache(
@@ -615,7 +1663,16 @@ def compute_elicitation_cache(
     use_provisional_valuations: bool,
     max_candidate_bundles: int | None,
     pv_client,
-) -> dict[str, _BidderElicitationCache]:
+    question_client=None,
+    opening_question: str | None = None,
+    interest_map_client=None,
+    pv_chunk_size: int | None = None,
+    pv_failure_policy: str = "raise",
+    interest_map_failure_policy: str = "raise",
+    pv_max_tokens: int | None = None,
+    max_parse_retries: int = 0,
+    fixed_disclosures: dict[str, BidderElicitationData] | None = None,
+) -> dict[str, BidderElicitationData]:
     """Run the NL-question + interest-map (+ optional PV) phase once.
 
     This is the expensive, arm-independent part of elicited proxy
@@ -623,22 +1680,59 @@ def compute_elicitation_cache(
     :meth:`LlmInferredXorProxy.replay_elicitation`.
     """
     print("  NL elicitation  [event-driven]", flush=True)
-    cache: dict[str, _BidderElicitationCache] = {}
+    cache: dict[str, BidderElicitationData] = {}
+    shared_question = opening_question
 
     for bidder_id, person in persons.items():
         proxy = LlmInferredXorProxy(bidder_id=bidder_id, person=person)
 
         # Emit initialisation events through the proxy event API.
-        proxy.handle_event(ProxyElicitationEvent(
-            event_type=INITIAL_PREFERENCE_QUESTION,
-            bidder_id=bidder_id,
-            mechanism="init",
-        ))
+        fixed_entry = (
+            None
+            if fixed_disclosures is None
+            else fixed_disclosures.get(bidder_id)
+        )
+        if fixed_disclosures is not None and fixed_entry is None:
+            raise ValueError(
+                f"fixed disclosure pack has no bidder {bidder_id!r}"
+            )
+        if fixed_entry is not None:
+            proxy.nl_transcript.append(
+                (fixed_entry.nl_question, fixed_entry.nl_answer)
+            )
+            if shared_question is None:
+                shared_question = fixed_entry.nl_question
+            elif fixed_entry.nl_question != shared_question:
+                raise ValueError(
+                    "fixed disclosure pack must use one shared opening question"
+                )
+            print(
+                f"  {bidder_id:<12}  nl  →  frozen disclosure",
+                flush=True,
+            )
+        else:
+            proxy.handle_event(ProxyElicitationEvent(
+                event_type=INITIAL_PREFERENCE_QUESTION,
+                bidder_id=bidder_id,
+                mechanism="init",
+                payload={
+                    "client": question_client,
+                    "question": shared_question,
+                },
+            ))
+            if shared_question is None:
+                # Proxy-generated robustness mode generates once for the selected
+                # catalogue, then reuses the same question for every bidder.
+                shared_question = proxy.nl_transcript[-1][0]
 
         im_response = proxy.handle_event(ProxyElicitationEvent(
             event_type=INFER_INTEREST_MAP,
             bidder_id=bidder_id,
             mechanism="init",
+            payload={
+                "failure_policy": interest_map_failure_policy,
+                "client": interest_map_client,
+            },
         ))
         im = im_response.payload["interest_map"]
 
@@ -652,28 +1746,93 @@ def compute_elicitation_cache(
             },
         ))
         cb = cb_response.payload["candidate_bundles"]
+        candidate_count_before_filter, candidate_count_after_filter = (
+            interest_map_candidate_counts(im, list(scenario.instance.items))
+        )
+        im_fallback_used = im.reasoning.startswith(
+            "Fallback: all interest-map parse attempts failed."
+        )
+        im_quality_flags = tuple(interest_map_quality_flags(
+            im,
+            list(scenario.instance.items),
+            fallback_used=im_fallback_used,
+            candidate_count_after_filter=candidate_count_after_filter,
+        ))
 
         if not cb:
             print(
                 f"  {bidder_id:<12}  WARNING: interest map produced no bundles; "
-                "falling back to all items",
+                "the bidder will have empty initial candidate support",
                 flush=True,
-            )
-            cb = generate_candidate_bundles(
-                scenario.instance.items,
-                max_bundle_size=len(scenario.instance.items),
             )
         im_detail = f"interested={sorted(im.interested_items)}"
         if im.complementary_groups:
             im_detail += f"  compl={[sorted(g) for g in im.complementary_groups]}"
         if im.substitute_groups:
-            im_detail += f"  subst={[sorted(g) for g in im.substitute_groups]}"
+            im_detail += (
+                "  subst="
+                + str([
+                    {
+                        "items": sorted(group.items),
+                        "mode": group.acquisition_mode,
+                    }
+                    for group in im.substitute_groups
+                ])
+            )
+        valuation_tables = getattr(scenario.instance, "valuations", None)
+        profile_metadata = (
+            (getattr(scenario, "metadata", {}) or {})
+            .get("profiles", {})
+            .get(bidder_id, {})
+        )
+        im_accuracy = None
+        if (
+            isinstance(valuation_tables, dict)
+            and bidder_id in valuation_tables
+        ):
+            true_interested = {
+                item
+                for item in scenario.instance.items
+                if valuation_tables[bidder_id].get(
+                    frozenset({item}), 0.0
+                ) > 0
+            }
+            im_accuracy = interest_map_accuracy(
+                im,
+                true_interested_items=true_interested,
+                true_substitute_groups=profile_metadata.get(
+                    "substitute_groups", []
+                ),
+                true_complement_groups=profile_metadata.get(
+                    "complement_groups", []
+                ),
+                available_items=set(scenario.instance.items),
+                nl_answer=proxy.nl_transcript[-1][1],
+                singleton_values={
+                    item: valuation_tables[bidder_id].get(
+                        frozenset({item}), 0.0
+                    )
+                    for item in scenario.instance.items
+                },
+            )
+        accuracy_detail = ""
+        if im_accuracy is not None:
+            accuracy_detail = (
+                f"  item_precision={im_accuracy['item_precision']:.2f}"
+                f"  item_recall={im_accuracy['item_recall']:.2f}"
+                f"  item_f1={im_accuracy['item_f1']:.2f}"
+                "  mode_acc="
+                f"{im_accuracy['mode_accuracy_on_matched_groups']}"
+            )
         print(
-            f"  {bidder_id:<12}  im  {im_detail}  →  {len(cb)} bundles",
+            f"  {bidder_id:<12}  im  {im_detail}  →  {len(cb)} bundles"
+            f"  flags={list(im_quality_flags)}"
+            f"{accuracy_detail}",
             flush=True,
         )
 
         raw_pv_values = None
+        pv_degraded = False
         if use_provisional_valuations:
             try:
                 pv_response = proxy.handle_event(ProxyElicitationEvent(
@@ -684,24 +1843,104 @@ def compute_elicitation_cache(
                         "candidate_bundles": cb,
                         "client": pv_client,
                         "interest_map": im,
+                        "max_candidate_bundles": max_candidate_bundles,
+                        "pv_chunk_size": pv_chunk_size,
+                        "max_parse_retries": max_parse_retries,
                     },
                 ))
                 raw_pv_values = pv_response.payload["raw_values"]
             except Exception as exc:
+                if pv_failure_policy == "raise":
+                    raise PvGenerationFailedError(
+                        bidder_id=bidder_id,
+                        candidate_count=len(cb),
+                        pv_chunk_size=pv_chunk_size,
+                        pv_max_tokens=pv_max_tokens,
+                        original_exception=exc,
+                    ) from exc
+                # pv_failure_policy == "zero": degraded debugging fallback.
+                # Zero-initialise every candidate bundle (never leave
+                # raw_pv_values as None) so the cached XOR bid is populated
+                # before replay -- this is what stops
+                # LlmAuctionProxyAdapter.current_bid() from falling through
+                # to a mass direct-value-query pass over every candidate
+                # bundle when no cached bid exists. Mechanism-triggered
+                # refinement caps still control any VQs issued afterwards.
                 print(
                     f"  {bidder_id:<12}  WARNING: PV failed "
-                    f"({type(exc).__name__}: {exc}); "
-                    "using zero-bid initialisation for this bidder.",
+                    f"({type(exc).__name__}: {exc}); DEGRADED: zero-"
+                    "initialising this bidder's candidate bundles "
+                    "(pv_failure_policy=zero). This does NOT fall back to "
+                    "direct value queries.",
                     flush=True,
                 )
+                raw_pv_values = {bundle: 0.0 for bundle in cb if bundle}
+                pv_degraded = True
+
+        pv_scale = provisional_value_scale_diagnostics(
+            scenario=scenario,
+            bidder_id=bidder_id,
+            raw_pv_values=raw_pv_values,
+        )
+        pv_scale_flags = tuple(pv_scale.get("quality_flags", ()))
+        if pv_scale_flags:
+            print(
+                f"  {bidder_id:<12}  WARNING: PV value scale mismatch "
+                f"flags={list(pv_scale_flags)}  "
+                f"max_ratio={pv_scale.get('max_value_ratio')}  "
+                f"singleton_ratio={pv_scale.get('max_singleton_ratio')}",
+                flush=True,
+            )
 
         nl_question, nl_answer = proxy.nl_transcript[-1]
-        cache[bidder_id] = _BidderElicitationCache(
+        cache[bidder_id] = BidderElicitationData(
             nl_question=nl_question,
             nl_answer=nl_answer,
             interest_map=im,
             candidate_bundles=cb,
             raw_pv_values=raw_pv_values,
+            pv_candidate_stats=proxy.last_pv_candidate_stats,
+            pv_chunk_stats=proxy.last_pv_chunk_stats,
+            pv_degraded=pv_degraded,
+            interest_map_fallback_used=im_fallback_used,
+            interest_map_quality_flags=im_quality_flags,
+            interest_map_candidate_count_before_filter=candidate_count_before_filter,
+            interest_map_candidate_count_after_filter=candidate_count_after_filter,
+            interest_map_accuracy=im_accuracy,
+            person_answer_verification=(
+                fixed_entry.person_answer_verification
+                if fixed_entry is not None
+                else person.last_answer_verification
+            ),
+            person_answer_verification_history=(
+                fixed_entry.person_answer_verification_history
+                if fixed_entry is not None
+                else person.answer_verification_history
+            ),
+            person_answer_attempt_count=(
+                fixed_entry.person_answer_attempt_count
+                if fixed_entry is not None
+                else person.answer_attempt_count
+            ),
+            person_first_answer_word_count=(
+                fixed_entry.person_first_answer_word_count
+                if fixed_entry is not None
+                else person.first_answer_word_count
+            ),
+            person_final_answer_word_count=(
+                fixed_entry.person_final_answer_word_count
+                if fixed_entry is not None
+                else person.final_answer_word_count
+            ),
+            pv_scale_quality_flags=pv_scale_flags,
+            pv_inferred_max_value=pv_scale.get("inferred_max_value"),
+            pv_ground_truth_max_value=pv_scale.get("ground_truth_max_value"),
+            pv_max_value_ratio=pv_scale.get("max_value_ratio"),
+            pv_inferred_max_singleton=pv_scale.get("inferred_max_singleton"),
+            pv_ground_truth_max_singleton=pv_scale.get(
+                "ground_truth_max_singleton"
+            ),
+            pv_max_singleton_ratio=pv_scale.get("max_singleton_ratio"),
         )
 
     return cache
@@ -716,13 +1955,24 @@ def make_live_proxies_for_scenario(
     api_key: str | None,
     temperature: float,
     max_tokens: int,
+    person_nl_max_tokens: int | None = None,
     timeout: float,
     logger: LlmCallLogger,
     max_parse_retries: int,
-    epsilon: float,
+    calibration: ValueCalibration | None = None,
     ask_initial_question: bool = False,
+    opening_question: str | None = None,
     use_ground_truth: bool = False,
     verbose: bool = False,
+    cache: LlmResponseCache | None = None,
+    cache_mode: str = "off",
+    cache_stats: CacheStats | None = None,
+    verifier_provider: str | None = None,
+    verifier_model: str | None = None,
+    verifier_base_url: str | None = None,
+    verifier_api_key: str | None = None,
+    verifier_temperature: float = 0.0,
+    verifier_max_tokens: int = 2000,
 ) -> dict[str, LlmInferredXorProxy]:
     persons = make_live_persons_for_scenario(
         scenario,
@@ -732,69 +1982,83 @@ def make_live_proxies_for_scenario(
         api_key=api_key,
         temperature=temperature,
         max_tokens=max_tokens,
+        person_nl_max_tokens=person_nl_max_tokens,
         timeout=timeout,
         logger=logger,
         max_parse_retries=max_parse_retries,
         use_ground_truth=use_ground_truth,
         verbose=verbose,
+        cache=cache,
+        cache_mode=cache_mode,
+        cache_stats=cache_stats,
+        verifier_provider=verifier_provider,
+        verifier_model=verifier_model,
+        verifier_base_url=verifier_base_url,
+        verifier_api_key=verifier_api_key,
+        verifier_temperature=verifier_temperature,
+        verifier_max_tokens=verifier_max_tokens,
     )
 
     proxies: dict[str, LlmInferredXorProxy] = {}
+    shared_question = opening_question
     for bidder_id, person in persons.items():
         proxy = LlmInferredXorProxy(
             bidder_id=bidder_id,
             person=person,
-            epsilon=epsilon,
+            calibration=calibration,
+            # The legacy epsilon field is inert once `calibration` is set, but
+            # llm_comparison still echoes it into `epsilon_by_bidder`; pin it
+            # to the neutral 1.0 rather than leaving the 0.75 dataclass
+            # default to be misread as an applied discount.
+            epsilon=1.0,
         )
         if ask_initial_question:
-            proxy.ask_initial_question()
+            proxy.ask_initial_question(question=shared_question)
+            if shared_question is None:
+                shared_question = proxy.nl_transcript[-1][0]
         proxies[bidder_id] = proxy
 
     return proxies
 
 
-def make_ceca_llm_proxies(
+def person_disclosure_rows_for_scenario(
     scenario: NaturalLanguageAuctionScenario,
-    *,
-    persons: dict[str, LlmPersonSimulator],
-    proxy_client,
-    ceca_proxy_type: str,
-    max_bundle_size: int,
-    gamma_refresh_every: int,
-    nvd_num_questions: int,
-    max_parse_retries: int,
-    logger,
-) -> dict:
-    """Build ωvd1/ωvd2/ωnvd CECA proxies for one scenario."""
-    scope = SizeLimitedScope(max_size=max_bundle_size)
-    result = {}
-    for bidder_id, person in persons.items():
-        common = dict(
-            bidder_id=bidder_id,
-            person=person,
-            items=list(scenario.instance.items),
-            proxy_client=proxy_client,
-            scenario_description=scenario.scenario_description,
-            item_descriptions=scenario.item_descriptions,
-            max_parse_retries=max_parse_retries,
-            logger=logger,
-        )
-        if ceca_proxy_type == "vd1":
-            result[bidder_id] = Vd1CecaProxy(**common)
-        elif ceca_proxy_type == "vd2":
-            result[bidder_id] = Vd2CecaProxy(
-                **common,
-                bundle_scope=scope,
-                gamma_refresh_every=gamma_refresh_every,
-            )
-        else:  # nvd
-            result[bidder_id] = NvdCecaProxy(
-                **common,
-                bundle_scope=scope,
-                gamma_refresh_every=gamma_refresh_every,
-                num_nl_questions=nvd_num_questions,
-            )
-    return result
+) -> list[dict]:
+    """One ``curated_person_disclosures.csv`` row per bidder.
+
+    Sources the exact brief qualitative disclosure used to condition each bidder's
+    :class:`~auctionlab.llm.person_simulator.LlmPersonSimulator`
+    (``scenario.person_seeds``, always present) plus, when available,
+    per-bidder provenance from ``scenario.metadata["profiles"]`` (populated
+    by :func:`auctionlab.instances.structured_spec.make_pc_build_scenario_from_spec`
+    -- ``person_seed_source`` identifies the brief qualitative renderer
+    and ``person_seed_identity_source`` records whether its identity came
+    from ``identity_text`` or ``role``). Scenarios without that metadata (e.g. the
+    hard-coded curated NL scenarios) still get a row per bidder, with
+    ``person_seed_source="unknown"`` and the remaining provenance fields
+    blank -- this export is about auditing exactly what text conditioned
+    each person, which is always available, not just spec-derived scenarios.
+    """
+    metadata = getattr(scenario, "metadata", {}) or {}
+    profiles_meta = metadata.get("profiles", {}) or {}
+
+    rows: list[dict] = []
+    for bidder_id in scenario.instance.bidder_ids:
+        profile_meta = profiles_meta.get(bidder_id, {})
+        rows.append({
+            "scenario": scenario.name,
+            "bidder_id": bidder_id,
+            "person_disclosure_text": scenario.person_seeds.get(bidder_id, ""),
+            "person_disclosure_style": "brief_qualitative",
+            "person_disclosure_source": profile_meta.get(
+                "person_seed_source", "unknown"
+            ),
+            "person_disclosure_identity_source": profile_meta.get(
+                "person_seed_identity_source", "unknown"
+            ),
+            "profile_role": profile_meta.get("role", ""),
+        })
+    return rows
 
 
 def select_scenarios(
@@ -804,11 +2068,25 @@ def select_scenarios(
     num_goods: int = 8,
     num_bidders: int = 8,
     scenario_seed: int = 0,
+    scenario_spec: str | None = None,
+    selection_policy: str = "prefix",
 ) -> list[NaturalLanguageAuctionScenario]:
     """Select scenarios by name/seed-type, or generate a single pc_build scenario."""
     if names and len(names) == 1 and names[0] == "pc_build":
-        from auctionlab.instances.structured import make_pc_build_scenario
-        scenarios = [make_pc_build_scenario(num_goods, num_bidders, scenario_seed)]
+        if scenario_spec is not None:
+            from auctionlab.instances.structured_spec import make_pc_build_scenario_from_spec
+            scenarios = [
+                make_pc_build_scenario_from_spec(
+                    scenario_spec,
+                    num_goods,
+                    num_bidders,
+                    seed=scenario_seed,
+                    selection_policy=selection_policy,
+                )
+            ]
+        else:
+            from auctionlab.instances.structured import make_pc_build_scenario
+            scenarios = [make_pc_build_scenario(num_goods, num_bidders, scenario_seed)]
     else:
         scenarios = curated_natural_language_scenarios()
         if names:
@@ -904,10 +2182,18 @@ def _print_sealed_proxy_summary(
     rq_by_bidder = result.metadata.get("refinement_query_count_by_bidder", {})
     total_recs = sum(len(recs) for recs in recs_by_bidder.values())
     total_queries = sum(rq_by_bidder.values())
+    actual_rounds = result.metadata.get(
+        "elicitation_rounds", elicitation_rounds
+    )
+    stopping_rule = result.metadata.get("stopping_rule", "fixed_rounds")
+    termination_reason = result.metadata.get("termination_reason", "")
 
     fill = max(0, 38)
     print(f"\n  ── proxy sealed post-run summary {'─' * fill}", flush=True)
-    print(f"    elicitation_rounds:    {elicitation_rounds}", flush=True)
+    print(f"    requested_max_rounds:  {elicitation_rounds}", flush=True)
+    print(f"    actual_rounds:         {actual_rounds}", flush=True)
+    print(f"    stopping_rule:         {stopping_rule}", flush=True)
+    print(f"    termination_reason:    {termination_reason}", flush=True)
     print(f"    feedback_rule:         {feedback_rule}", flush=True)
     print(f"    refinement_records:    {total_recs}", flush=True)
     print(f"    total_queries_issued:  {total_queries}", flush=True)
@@ -928,8 +2214,156 @@ def _print_sealed_proxy_summary(
             )
 
 
+def print_sealed_proxy_trajectory(rows: list[dict]) -> None:
+    """Print a compact per-round trajectory table for the proxy sealed arm."""
+    if not rows:
+        return
+    print(f"\n  ── proxy sealed trajectory {'─' * 33}", flush=True)
+    print(
+        f"  {'round':>5}  {'true welfare':>12}  {'eff':>7}"
+        f"  {'new VQ':>6}  {'cum VQ':>6}  {'alloc Δ':>7}",
+        flush=True,
+    )
+    for row in rows:
+        eff = row["global_efficiency"]
+        eff_str = _pct(eff) if isinstance(eff, (int, float)) else "—"
+        changed = "yes" if row["allocation_changed_from_previous_round"] else "no"
+        print(
+            f"  {row['round']:>5}  {row['true_welfare']:>12.0f}  {eff_str:>7}"
+            f"  {row['new_value_queries']:>6}  {row['cumulative_value_queries']:>6}"
+            f"  {changed:>7}",
+            flush=True,
+        )
+
+
+def print_proxy_clock_trajectory(top_k: int, round_rows: list[dict]) -> None:
+    """Print a compact per-round trajectory table for one proxy clock k run.
+
+    ``true welfare`` is always ground-truth welfare (shown as
+    true/full-info-optimum) of the allocation the clock would finalize if it
+    stopped at this round -- never *reported* welfare (the WDP objective
+    over the clock's accumulated supplementary/reported atoms, available
+    separately as each row's ``finalise_reported_welfare``). ``supp atoms``
+    is the count of bundles in that accumulated supplementary-atom pool
+    (what the finalise-at-round WDP actually runs over), not a proxy's
+    static candidate-bundle universe (``candidate_atoms_total``, a
+    different, unrelated count).
+    """
+    if not round_rows:
+        return
+    print(f"\n  ── proxy clock k={top_k} trajectory {'─' * 27}", flush=True)
+    print(
+        f"  {'round':>5}  {'true welfare':>13}  {'eff':>7}  {'new_vq':>6}"
+        f"  {'cum_vq':>6}  {'supp atoms':>10}  {'events':>6}  {'alloc_changed':>13}",
+        flush=True,
+    )
+    for row in round_rows:
+        eff = row["finalise_global_efficiency"]
+        eff_str = _pct(eff) if isinstance(eff, (int, float)) else "—"
+        welfare_str = (
+            f"{row['finalise_true_welfare']:.0f}/{row['full_info_welfare']:.0f}"
+        )
+        changed = "true" if row["allocation_changed_from_previous_round"] else "false"
+        print(
+            f"  {row['round']:>5}  {welfare_str:>13}  {eff_str:>7}"
+            f"  {row['new_value_queries']:>6}  {row['cumulative_value_queries']:>6}"
+            f"  {row['supplementary_atoms_total']:>10}"
+            f"  {row['num_events_this_round']:>6}  {changed:>13}",
+            flush=True,
+        )
+
+
+def print_event_usefulness_summary(top_k: int, event_rows: list[dict]) -> None:
+    """Print per-event-type usefulness stats for one proxy clock k run."""
+    if not event_rows:
+        return
+    by_type: dict[str, list[dict]] = {}
+    for row in event_rows:
+        by_type.setdefault(row["event_type"], []).append(row)
+
+    print(f"\n  ── proxy clock k={top_k} event usefulness {'─' * 20}", flush=True)
+    print(
+        f"  {'event_type':<20}  {'count':>5}  {'refinements':>11}"
+        f"  {'avg_abs_correction':>18}  {'final_hits':>10}"
+        f"  {'pricing_hits':>12}  {'oracle_price_hits':>17}",
+        flush=True,
+    )
+    for event_type in sorted(by_type):
+        rows = by_type[event_type]
+        corrections = [r["abs_correction"] for r in rows if r["abs_correction"] != ""]
+        avg_correction = sum(corrections) / len(corrections) if corrections else 0.0
+        final_hits = sum(1 for r in rows if r["appears_in_final_allocation"])
+        pricing_hits = sum(
+            1 for r in rows if r["appears_in_reported_vcg_counterfactual"]
+        )
+        oracle_pricing_hits = sum(
+            1 for r in rows if r["appears_in_full_info_vcg_counterfactual"]
+        )
+        print(
+            f"  {event_type:<20}  {len(rows):>5}  {len(rows):>11}"
+            f"  {avg_correction:>18.1f}  {final_hits:>10}"
+            f"  {pricing_hits:>12}  {oracle_pricing_hits:>17}",
+            flush=True,
+        )
+
+
+def print_topk_comparison(rows: list[dict]) -> None:
+    """Print the end-of-scenario top-k comparison summary.
+
+    ``welfare`` here is always *true* welfare (ground-truth value of the
+    final allocation) over the global full-info optimum -- never reported
+    (proxy self-declared) welfare, which can overstate true welfare and
+    would silently mismatch the efficiency column otherwise. Reported
+    welfare is shown separately so the two are never conflated. ``supp
+    atoms`` is the clock's final accumulated supplementary/reported atom
+    count (what the finalizing WDP ran over), not a proxy's static
+    candidate-bundle universe.
+    """
+    if not rows:
+        return
+    print(f"\n  ── top-k comparison {'─' * 35}", flush=True)
+    print(
+        f"  {'k':>3}  {'final true welfare':>19}  {'best true welfare':>19}"
+        f"  {'final eff':>9}  {'best eff':>8}  {'best rnd':>8}  {'term':>18}"
+        f"  {'reported':>9}  {'cum_vq':>7}  {'supp atoms':>10}"
+        f"  {'fi_coverage':>12}  {'failure':>28}",
+        flush=True,
+    )
+    for row in rows:
+        welfare_str = f"{row['true_welfare']:.0f}/{row['full_info_welfare']:.0f}"
+        eff_str = _pct(row["efficiency"])
+        coverage_str = f"{row['fi_winner_coverage_hits']}/{row['fi_winner_coverage_total']}"
+
+        best_welfare = row.get("best_true_welfare")
+        best_eff = row.get("best_true_efficiency")
+        best_round = row.get("best_round")
+        termination = row.get("termination_reason")
+
+        best_welfare_str = (
+            f"{best_welfare:.0f}/{row['full_info_welfare']:.0f}"
+            if best_welfare is not None
+            else "—"
+        )
+        best_eff_str = _pct(best_eff) if best_eff is not None else "—"
+        best_round_str = str(best_round) if best_round is not None else "—"
+        term_str = termination if termination else "—"
+
+        print(
+            f"  {row['top_k']:>3}  {welfare_str:>19}  {best_welfare_str:>19}"
+            f"  {eff_str:>9}  {best_eff_str:>8}  {best_round_str:>8}  {term_str:>18}"
+            f"  {row['reported_welfare']:>9.0f}  {row['cumulative_value_queries']:>7}"
+            f"  {row['supplementary_atoms_total']:>10}  {coverage_str:>12}"
+            f"  {row['failure_classification']:>28}",
+            flush=True,
+        )
+
+
 _PERSON_PROMPT_TYPES = {"value_query", "demand_query", "nl_question"}
-_PROXY_PROMPT_TYPES = {"proxy_nl_gen", "proxy_interest_map", "proxy_provisional_valuations"}
+_VERIFIER_PROMPT_TYPES = {"person_answer_semantic_extraction"}
+_PROXY_PROMPT_TYPES = {
+    "proxy_nl_gen", "proxy_interest_map", "proxy_provisional_valuations",
+    "proxy_interest_map_complement_entailment", "proxy_late_reflection",
+}
 
 
 def print_nl_sample(proxies: dict) -> None:
@@ -978,7 +2412,14 @@ def print_nl_sample(proxies: dict) -> None:
             )
         if im.substitute_groups:
             print(
-                f"      substitutes: {[sorted(g) for g in im.substitute_groups]}",
+                "      substitutes: "
+                + str([
+                    {
+                        "items": sorted(group.items),
+                        "mode": group.acquisition_mode,
+                    }
+                    for group in im.substitute_groups
+                ]),
                 flush=True,
             )
         if im.budget_hint is not None:
@@ -1012,6 +2453,7 @@ def print_arm_summary(
         "nl_gen": "nl-gen",
         "interest_map": "im",
         "provisional_valuations": "pv",
+        "late_reflection": "late-reflection",
     }
     proxy_calls: dict[str, int] = {}
     proxy_in: dict[str, int] = {}
@@ -1027,6 +2469,19 @@ def print_arm_summary(
     person_out = sum(s.output_tokens for pt, s in token_stats.items() if pt in _PERSON_PROMPT_TYPES)
     prx_in = sum(proxy_in.values())
     prx_out = sum(proxy_out.values())
+    verifier_calls = sum(
+        s.calls for pt, s in token_stats.items() if pt in _VERIFIER_PROMPT_TYPES
+    )
+    verifier_in = sum(
+        s.input_tokens
+        for pt, s in token_stats.items()
+        if pt in _VERIFIER_PROMPT_TYPES
+    )
+    verifier_out = sum(
+        s.output_tokens
+        for pt, s in token_stats.items()
+        if pt in _VERIFIER_PROMPT_TYPES
+    )
     total_in = person_in + prx_in
     total_out = person_out + prx_out
 
@@ -1049,7 +2504,7 @@ def print_arm_summary(
     for short, cnt in sorted(proxy_calls.items()):
         _qrow(f"proxy  {_PROXY_LABEL.get(short, short)}", cnt)
 
-    have_tokens = total_in or total_out
+    have_tokens = total_in or total_out or verifier_in or verifier_out
     if have_tokens:
         print(
             f"\n  {'tokens':<30}  {'in':>8}  {'out':>8}",
@@ -1067,6 +2522,12 @@ def print_arm_summary(
             _trow("person (vq/dq/nl)", person_in, person_out)
         if prx_in or prx_out:
             _trow("proxy  (nl-gen/im/pv)", prx_in, prx_out)
+        if verifier_calls:
+            _trow(
+                f"offline verifier ({verifier_calls} calls)",
+                verifier_in,
+                verifier_out,
+            )
         _trow("total", total_in, total_out)
         if n_bidders > 1:
             _trow("total", total_in, total_out, avg=True)
@@ -1099,7 +2560,7 @@ def _print_results_table(summary: list[dict]) -> None:
     print(wide)
     hdr = (
         f"  {'scenario':<{scen_w}}  {'arm':<{arm_w}}"
-        f"  {'eff':>7}  {'welfare':>13}"
+        f"  {'eff':>7}  {'true welfare':>13}"
         f"  {'revenue':>8}  {'surplus':>8}"
         f"  {'tok-in':>8}  {'tok-out':>8}"
     )
@@ -1159,11 +2620,22 @@ def _print_results_table(summary: list[dict]) -> None:
         )
         print(row)
     print(wide)
+    print(
+        "  NOTE: 'true welfare' is ground-truth welfare (shown as true/full-info-optimum); "
+        "'revenue' is VCG revenue computed from each arm's REPORTED bids (not true values); "
+        "'surplus' is true surplus = true welfare − revenue, and can be negative when an "
+        "arm's reported bids overstate true value.",
+        flush=True,
+    )
     # Token accounting legend
     has_shared = any(r.get("arm", "") == "shared initial (nl+im+pv)" for r in summary)
     if has_shared:
-        n_amort = sum(1 for r in summary if r.get("shared_tok_in_amort", 0) > 0)
-        n_elicited = n_amort or "?"
+        n_elicited = sum(
+            1
+            for r in summary
+            if r.get("arm", "") != "shared initial (nl+im+pv)"
+            and "shared_tok_in_amort" in r
+        )
         print(
             f"  NOTE: 'shared initial' tokens are the one-time NL/IM/PV "
             f"elicitation cost, amortised across {n_elicited} elicited arms "
@@ -1187,101 +2659,32 @@ def print_ollama_help(model: str) -> None:
     )
 
 
-def _print_ceca_payment_table(
-    instance,
-    shared: "ProxyCecaSharedResult",
-    results: dict,
-) -> None:
-    """Print combined allocation + payment table for one CECA mode.
-
-    ``results`` is keyed by payment_rule; all entries share the same
-    allocation. When only one payment rule is present the table has a
-    single payment/surplus column pair; when two are present both appear
-    side-by-side for direct comparison.
-    """
-    state = shared.ceca_state
-    rounds = len(state.history)
-    stopped_reason = getattr(shared, 'stopped_reason', None)
-    if stopped_reason == "converged":
-        conv_str = "converged"
-    elif stopped_reason == "no_new_information":
-        conv_str = "stopped: no new information"
-    elif stopped_reason == "max_rounds":
-        conv_str = f"NOT converged ({rounds} rounds)"
-    else:
-        conv_str = "converged" if state.converged else f"NOT converged ({rounds} rounds)"
-    mode = shared.ceca_initial_bid_mode
-    print(
-        f"\n  CECA final allocation  ({mode}  {rounds} rounds  {conv_str})",
-        flush=True,
-    )
-
-    rules = sorted(results)
-    if not rules:
-        return
-
-    # Take allocation from the first result (all share the same allocation).
-    allocation = next(iter(results.values())).allocation
-    manifest_bids = state.manifest_bids
-
-    winners = [
-        (bidder_id, bundle)
-        for bidder_id, bundle in sorted(allocation.items())
-        if bundle
+def llm_role_summary_fields(logger: LlmCallLogger) -> dict[str, int]:
+    """Aggregate successful logged calls and tokens by person/proxy role."""
+    totals = logger.total_stats()
+    person_prompt_types = {
+        "nl_question",
+        "value_query",
+        "demand_query",
+    }
+    person_stats = [
+        stats
+        for prompt_type, stats in totals.items()
+        if prompt_type in person_prompt_types
     ]
-    if not winners:
-        print("    (no winners)", flush=True)
-        return
-
-    # Column headers depend on number of payment rules.
-    if len(rules) == 1:
-        rule = rules[0]
-        short = "PAB" if rule == "pay_as_bid" else "VCG"
-        print(
-            f"    {'bidder':<20}  {'bundle':<24}  {'reported':>9}"
-            f"  {'true':>9}  {short+' pay':>9}  {'surplus':>9}",
-            flush=True,
-        )
-        for bidder_id, bundle in winners:
-            rep = (
-                manifest_bids[bidder_id].value_of(bundle)
-                if bidder_id in manifest_bids
-                else float("nan")
-            )
-            true_v = instance.value_of(bidder_id, bundle)
-            pay = results[rule].payments.get(bidder_id, 0.0)
-            bstr = "{" + ",".join(sorted(bundle)) + "}"
-            print(
-                f"    {bidder_id:<20}  {bstr:<24}  {rep:>9.0f}"
-                f"  {true_v:>9.0f}  {pay:>9.0f}  {true_v - pay:>9.0f}",
-                flush=True,
-            )
-    else:
-        # Both payment rules: side-by-side.
-        print(
-            f"    {'bidder':<20}  {'bundle':<24}  {'reported':>9}  {'true':>9}"
-            f"  {'PAB pay':>8}  {'VCG pay':>8}  {'surp-PAB':>9}  {'surp-VCG':>9}",
-            flush=True,
-        )
-        pab_result = results.get("pay_as_bid")
-        vcg_result = results.get("vcg")
-        for bidder_id, bundle in winners:
-            rep = (
-                manifest_bids[bidder_id].value_of(bundle)
-                if bidder_id in manifest_bids
-                else float("nan")
-            )
-            true_v = instance.value_of(bidder_id, bundle)
-            pab_pay = pab_result.payments.get(bidder_id, 0.0) if pab_result else float("nan")
-            vcg_pay = vcg_result.payments.get(bidder_id, 0.0) if vcg_result else float("nan")
-            bstr = "{" + ",".join(sorted(bundle)) + "}"
-            print(
-                f"    {bidder_id:<20}  {bstr:<24}  {rep:>9.0f}  {true_v:>9.0f}"
-                f"  {pab_pay:>8.0f}  {vcg_pay:>8.0f}"
-                f"  {true_v - pab_pay:>9.0f}  {true_v - vcg_pay:>9.0f}",
-                flush=True,
-            )
-    print(flush=True)
+    proxy_stats = [
+        stats
+        for prompt_type, stats in totals.items()
+        if prompt_type.startswith("proxy_")
+    ]
+    return {
+        "person_llm_calls": sum(stats.calls for stats in person_stats),
+        "person_tokens_in": sum(stats.input_tokens for stats in person_stats),
+        "person_tokens_out": sum(stats.output_tokens for stats in person_stats),
+        "proxy_llm_calls": sum(stats.calls for stats in proxy_stats),
+        "proxy_tokens_in": sum(stats.input_tokens for stats in proxy_stats),
+        "proxy_tokens_out": sum(stats.output_tokens for stats in proxy_stats),
+    }
 
 
 def main() -> None:
@@ -1292,6 +2695,25 @@ def main() -> None:
 
     # Apply preset defaults for any flags not explicitly set on the command line
     _preset_applied = apply_preset(args, _explicitly_set)
+    resolve_llm_role_args(args)
+    resolve_person_query_mode(args)
+    resolve_initial_elicitation_flags(args)
+    try:
+        resolve_event_policy(args, _explicitly_set)
+    except ValueError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        raise SystemExit(2) from exc
+
+    _deprecations: list[str] = []
+    try:
+        calibration = resolve_cli_calibration(
+            args,
+            _explicitly_set,
+            warn=_deprecations.append,
+        )
+    except CalibrationConfigError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        raise SystemExit(2) from exc
 
     try:
         scenarios = select_scenarios(
@@ -1300,14 +2722,125 @@ def main() -> None:
             num_goods=args.num_goods,
             num_bidders=args.num_bidders,
             scenario_seed=args.scenario_seed,
+            scenario_spec=args.scenario_spec,
+            selection_policy=args.selection_policy,
         )
     except ValueError as exc:
         print(f"Error: {exc}", file=sys.stderr)
         raise SystemExit(2) from exc
 
+    if args.prepare_elicitation_only and args.write_elicitation_pack is None:
+        print(
+            "Error: --prepare-elicitation-only requires "
+            "--write-elicitation-pack",
+            file=sys.stderr,
+        )
+        raise SystemExit(2)
+    if args.write_elicitation_pack is not None and not (
+        args.use_interest_map and args.use_provisional_valuations
+    ):
+        print(
+            "Error: frozen elicitation format v1 requires both "
+            "--use-interest-map and --use-provisional-valuations",
+            file=sys.stderr,
+        )
+        raise SystemExit(2)
+    if args.elicitation_pack is not None and args.write_elicitation_pack is not None:
+        print(
+            "Error: --elicitation-pack and --write-elicitation-pack are "
+            "mutually exclusive",
+            file=sys.stderr,
+        )
+        raise SystemExit(2)
+    if args.elicitation_pack is not None and args.disclosure_pack is not None:
+        print(
+            "Error: --elicitation-pack and --disclosure-pack are mutually "
+            "exclusive",
+            file=sys.stderr,
+        )
+        raise SystemExit(2)
+    if (
+        args.disclosure_pack is not None
+        and args.write_elicitation_pack is None
+    ):
+        print(
+            "Error: --disclosure-pack requires --write-elicitation-pack",
+            file=sys.stderr,
+        )
+        raise SystemExit(2)
+    if (
+        args.elicitation_pack is not None
+        or args.disclosure_pack is not None
+        or args.write_elicitation_pack is not None
+    ) and len(scenarios) != 1:
+        print(
+            "Error: frozen elicitation currently requires exactly one "
+            "materialised scenario per invocation",
+            file=sys.stderr,
+        )
+        raise SystemExit(2)
+
+    frozen_pack = None
+    disclosure_pack = None
+    if args.elicitation_pack is not None:
+        try:
+            frozen_pack = load_frozen_elicitation_pack(
+                args.elicitation_pack
+            )
+            validate_pack_for_scenario(
+                frozen_pack,
+                scenarios[0],
+                scenario_spec_path=args.scenario_spec,
+            )
+        except (OSError, ValueError) as exc:
+            print(f"Error loading elicitation pack: {exc}", file=sys.stderr)
+            raise SystemExit(2) from exc
+        settings = frozen_pack.generation_settings
+        args.ask_initial_question = True
+        args.use_interest_map = bool(
+            settings.get("use_interest_map", True)
+        )
+        args.use_provisional_valuations = bool(
+            settings.get("use_provisional_valuations", True)
+        )
+        # Initial-role provenance comes from the immutable pack, not from
+        # whichever provider/model defaults happen to be on this replay CLI.
+        args.person_provider = frozen_pack.person_model.provider
+        args.person_model = frozen_pack.person_model.model
+        args.person_temperature = frozen_pack.person_model.temperature or 0.0
+        args.proxy_provider = frozen_pack.proxy_model.provider
+        args.proxy_model = frozen_pack.proxy_model.model
+        args.proxy_temperature = frozen_pack.proxy_model.temperature or 0.0
+    elif args.disclosure_pack is not None:
+        try:
+            disclosure_pack = load_frozen_elicitation_pack(
+                args.disclosure_pack
+            )
+            validate_pack_for_scenario(
+                disclosure_pack,
+                scenarios[0],
+                scenario_spec_path=args.scenario_spec,
+            )
+        except (OSError, ValueError) as exc:
+            print(f"Error loading disclosure pack: {exc}", file=sys.stderr)
+            raise SystemExit(2) from exc
+        args.ask_initial_question = True
+        args.use_interest_map = True
+        args.use_provisional_valuations = True
+        # The person role is immutable in this treatment; only the proxy role
+        # is regenerated with the current provider/model.
+        args.person_provider = disclosure_pack.person_model.provider
+        args.person_model = disclosure_pack.person_model.model
+        args.person_temperature = (
+            disclosure_pack.person_model.temperature or 0.0
+        )
+
     # Full config header
-    for line in format_run_config(args, scenarios):
+    for line in format_run_config(args, scenarios, calibration=calibration):
         print(line, flush=True)
+
+    for _deprecation in _deprecations:
+        print(f"\n  DEPRECATION: {_deprecation}", flush=True)
 
     if _preset_applied:
         print(
@@ -1328,54 +2861,116 @@ def main() -> None:
         for top_k in args.top_k
     }
     sealed_proxy_path = log_dir / "curated_sealed_proxy_elicited.csv"
+    sealed_proxy_trajectory_path = log_dir / "curated_proxy_sealed_trajectory.csv"
     clock_proxy_paths = {
         top_k: log_dir / f"curated_clock_proxy_elicited_top_{top_k}.csv"
         for top_k in args.top_k
     }
-    ceca_payment_rules = (
-        ["pay_as_bid", "vcg"]
-        if args.ceca_payment_rule == "both"
-        else [args.ceca_payment_rule]
-    )
-    # nargs="+" means this is always a list; normalise for safety.
-    _raw_modes = getattr(args, "ceca_initial_bid_mode", ["full_proxy"])
-    ceca_initial_bid_modes: list[str] = (
-        _raw_modes if isinstance(_raw_modes, list) else [_raw_modes]
-    )
-    # Keyed by (mode, payment_rule) tuple.
-    ceca_proxy_paths = {
-        (mode, rule): log_dir / f"curated_ceca_proxy_elicited_{mode}_{rule}.csv"
-        for mode in ceca_initial_bid_modes
-        for rule in ceca_payment_rules
+    clock_round_paths = {
+        top_k: log_dir / f"curated_proxy_clock_rounds_top_{top_k}.csv"
+        for top_k in args.top_k
     }
-    ceca_diagnostics_paths = {
-        mode: log_dir / f"curated_ceca_value_payment_diagnostics_{mode}.csv"
-        for mode in ceca_initial_bid_modes
+    clock_bidder_round_paths = {
+        top_k: log_dir / f"curated_proxy_clock_bidder_rounds_top_{top_k}.csv"
+        for top_k in args.top_k
     }
+    clock_coverage_paths = {
+        top_k: log_dir / f"curated_proxy_clock_coverage_top_{top_k}.csv"
+        for top_k in args.top_k
+    }
+    clock_event_paths = {
+        top_k: log_dir / f"curated_proxy_clock_event_usefulness_top_{top_k}.csv"
+        for top_k in args.top_k
+    }
+    person_disclosures_path = log_dir / "curated_person_disclosures.csv"
     refinement_path = log_dir / "curated_refinement_records.csv"
+    late_reflection_path = log_dir / "curated_late_reflection_records.csv"
+    late_reflection_candidates_path = log_dir / "curated_late_reflection_candidates.csv"
+    pv_candidate_bundle_stats_path = log_dir / "curated_pv_candidate_bundle_stats.csv"
+    run_summary_path = log_dir / "curated_run_summary.csv"
+    run_config_path = log_dir / "run_config.json"
 
-    logger = LlmCallLogger(log_path)
+    # Written before any mechanism runs so the effective calibration is on
+    # disk even if the run later fails.
+    write_run_config_json(
+        run_config_path,
+        build_run_config_document(
+            args,
+            calibration=calibration,
+            scenarios=scenarios,
+            extra={
+                "deprecation_warnings": list(_deprecations),
+                "top_k": list(args.top_k),
+            },
+        ),
+    )
+    _calibration_fields = calibration_summary_fields(calibration)
+
+    # Each invocation owns its calls.jsonl. Reusing a log directory must not
+    # silently mix this run's accounting with an earlier run.
+    logger = LlmCallLogger(log_path, append=False)
+    llm_cache = (
+        LlmResponseCache(args.llm_cache_path)
+        if args.llm_cache_mode != "off"
+        else None
+    )
+    llm_cache_stats = CacheStats()
+    print(
+        f"  llm_cache_mode            {args.llm_cache_mode}"
+        + (f"  path={args.llm_cache_path}" if llm_cache is not None else ""),
+        flush=True,
+    )
     cfg = ClockConfig(
         max_rounds=args.max_rounds,
         price_step=args.price_step,
         reserve=args.reserve,
     )
-    ceca_cfg = CecaConfig(max_rounds=args.ceca_max_rounds)
+    late_reflection_config = LateReflectionConfig(
+        enabled=args.late_reflection,
+        scope=args.late_reflection_scope,
+        followup=args.late_reflection_followup,
+        followups_per_bidder=args.late_reflection_followups_per_bidder,
+        near_clearing_threshold=args.late_reflection_near_clearing_threshold,
+        recent_window_rounds=args.late_reflection_recent_window_rounds,
+        max_tokens=args.late_reflection_max_tokens,
+        late_reflection_max_bidders=args.late_reflection_max_bidders,
+    )
+    # A separate client (not the shared VQ/DQ one) so the late-reflection
+    # question-generation call gets its own, larger max_tokens budget --
+    # see --late-reflection-max-tokens.
+    late_reflection_client = (
+        make_live_client(
+            model=args.proxy_model,
+            provider=args.proxy_provider,
+            base_url=args.proxy_base_url,
+            api_key=args.proxy_api_key,
+            temperature=args.proxy_temperature,
+            max_tokens=args.late_reflection_max_tokens,
+            timeout=args.timeout,
+            cache=llm_cache,
+            cache_mode=args.llm_cache_mode,
+            cache_stats=llm_cache_stats,
+            llm_role="proxy",
+        )
+        if args.late_reflection
+        else None
+    )
 
     sealed_rows = []
     clock_rows_by_top_k = {top_k: [] for top_k in args.top_k}
     sealed_proxy_rows = []
     clock_proxy_rows_by_top_k = {top_k: [] for top_k in args.top_k}
-    # Keyed by (mode, payment_rule) tuple, parallel to ceca_proxy_paths.
-    ceca_proxy_rows: dict[tuple[str, str], list] = {
-        (mode, rule): []
-        for mode in ceca_initial_bid_modes
-        for rule in ceca_payment_rules
-    }
-    ceca_winner_diagnostics: list[dict] = []
-    ceca_satisfaction_diag_rows: list[dict] = []
+    clock_round_rows_by_top_k = {top_k: [] for top_k in args.top_k}
+    clock_bidder_round_rows_by_top_k = {top_k: [] for top_k in args.top_k}
+    clock_coverage_rows_by_top_k = {top_k: [] for top_k in args.top_k}
+    clock_event_rows_by_top_k = {top_k: [] for top_k in args.top_k}
     _summary: list[dict] = []
     all_refinement_rows: list[dict] = []
+    all_late_reflection_rows: list[dict] = []
+    all_late_reflection_candidate_rows: list[dict] = []
+    all_trajectory_rows: list[dict] = []
+    all_pv_candidate_bundle_stats_rows: list[dict] = []
+    all_person_disclosure_rows: list[dict] = []
 
     for scenario in scenarios:
         max_bundle_size = min(
@@ -1390,6 +2985,42 @@ def main() -> None:
 
         print(f"\n▶  {scenario.name}", flush=True)
 
+        _scenario_md = getattr(scenario, "metadata", {}) or {}
+        _scenario_seed = _scenario_md.get("scenario_seed", args.scenario_seed)
+        _scenario_num_goods = _scenario_md.get(
+            "num_goods", len(scenario.instance.items)
+        )
+        _scenario_num_bidders = _scenario_md.get(
+            "num_bidders", len(scenario.instance.bidder_ids)
+        )
+        _scenario_opening_question = (
+            args.opening_question.strip()
+            if args.opening_question is not None
+            else (
+                canonical_opening_question(
+                    domain=_scenario_md.get("domain")
+                )
+                if args.opening_question_policy == "canonical"
+                else None
+            )
+        )
+        if _scenario_opening_question == "":
+            raise ValueError("--opening-question must be non-empty")
+        _scenario_verifier_provider = (
+            args.verifier_provider
+            or _scenario_md.get("environment_generation_provider")
+            or args.proxy_provider
+        )
+        _scenario_verifier_model = (
+            args.verifier_model
+            or _scenario_md.get("environment_generation_model")
+            or args.proxy_model
+        )
+
+        all_person_disclosure_rows.extend(
+            person_disclosure_rows_for_scenario(scenario)
+        )
+
         bundles_by_bidder = {
             bidder_id: candidate_bundles
             for bidder_id in scenario.instance.bidder_ids
@@ -1397,49 +3028,286 @@ def main() -> None:
 
         _nl_sample_shown = [False]
         _n_bidders = len(scenario.instance.bidder_ids)
+        _topk_comparison = []
 
         _persons_cache: list[dict[str, LlmPersonSimulator] | None] = [None]
-        _elicitation_cache: list[dict[str, _BidderElicitationCache] | None] = [None]
+        _elicitation_cache: list[
+            dict[str, BidderElicitationData] | None
+        ] = [None]
 
         def _get_persons() -> dict[str, LlmPersonSimulator]:
             if _persons_cache[0] is None:
-                _persons_cache[0] = make_live_persons_for_scenario(
-                    scenario,
-                    model=args.model,
-                    provider=args.provider,
-                    base_url=args.base_url,
-                    api_key=args.api_key,
-                    temperature=args.temperature,
-                    max_tokens=args.max_tokens,
-                    timeout=args.timeout,
-                    logger=logger,
-                    max_parse_retries=args.max_parse_retries,
-                    use_ground_truth=args.ground_truth_queries,
-                    verbose=args.verbose,
-                )
+                if (
+                    (frozen_pack is not None or disclosure_pack is not None)
+                    and args.ground_truth_queries
+                ):
+                    # Frozen replay plus deterministic refinements requires no
+                    # network client.  The placeholder would fail loudly if a
+                    # future code path accidentally attempted a live call.
+                    _persons_cache[0] = {
+                        bidder_id: LlmPersonSimulator(
+                            bidder_id=bidder_id,
+                            scenario_description=scenario.scenario_description,
+                            person_seed=scenario.person_seeds[bidder_id],
+                            item_descriptions=scenario.item_descriptions,
+                            client=MockLlmClient(responses=[]),
+                            logger=logger,
+                            model_name=args.person_model,
+                            provider_name=args.person_provider,
+                            max_parse_retries=args.max_parse_retries,
+                            ground_truth_valuations=(
+                                scenario.instance.valuations[bidder_id]
+                            ),
+                            verbose=args.verbose,
+                            scenario_id=scenario.name,
+                        )
+                        for bidder_id in scenario.instance.bidder_ids
+                    }
+                else:
+                    _persons_cache[0] = make_live_persons_for_scenario(
+                        scenario,
+                        model=args.person_model,
+                        provider=args.person_provider,
+                        base_url=args.person_base_url,
+                        api_key=args.person_api_key,
+                        temperature=args.person_temperature,
+                        max_tokens=args.max_tokens,
+                        person_nl_max_tokens=args.person_nl_max_tokens,
+                        timeout=args.timeout,
+                        logger=logger,
+                        max_parse_retries=args.max_parse_retries,
+                        use_ground_truth=args.ground_truth_queries,
+                        verbose=args.verbose,
+                        cache=llm_cache,
+                        cache_mode=args.llm_cache_mode,
+                        cache_stats=llm_cache_stats,
+                        verifier_provider=_scenario_verifier_provider,
+                        verifier_model=_scenario_verifier_model,
+                        verifier_base_url=args.verifier_base_url,
+                        verifier_api_key=args.verifier_api_key,
+                        verifier_temperature=args.verifier_temperature,
+                        verifier_max_tokens=args.verifier_max_tokens,
+                    )
             return _persons_cache[0]
 
-        def _get_elicitation_cache() -> dict[str, _BidderElicitationCache]:
+        def _get_elicitation_cache() -> dict[str, BidderElicitationData]:
             if _elicitation_cache[0] is None:
-                pv_client = None
-                if args.use_provisional_valuations:
-                    pv_client = make_live_client(
-                        model=args.model,
-                        provider=args.provider,
-                        base_url=args.base_url,
-                        api_key=args.api_key,
-                        temperature=args.temperature,
-                        max_tokens=args.pv_max_tokens,
-                        timeout=args.timeout,
+                if frozen_pack is not None:
+                    _elicitation_cache[0] = dict(frozen_pack.bidders)
+                    print(
+                        f"  frozen elicitation replay → "
+                        f"{args.elicitation_pack}",
+                        flush=True,
                     )
-                _elicitation_cache[0] = compute_elicitation_cache(
-                    scenario=scenario,
-                    persons=_get_persons(),
-                    use_provisional_valuations=args.use_provisional_valuations,
-                    max_candidate_bundles=args.max_candidate_bundles,
-                    pv_client=pv_client,
-                )
+                else:
+                    pv_client = None
+                    question_client = (
+                        make_live_client(
+                            model=args.proxy_model,
+                            provider=args.proxy_provider,
+                            base_url=args.proxy_base_url,
+                            api_key=args.proxy_api_key,
+                            temperature=args.proxy_temperature,
+                            max_tokens=args.max_tokens,
+                            timeout=args.timeout,
+                            cache=llm_cache,
+                            cache_mode=args.llm_cache_mode,
+                            cache_stats=llm_cache_stats,
+                            llm_role="proxy",
+                        )
+                        if _scenario_opening_question is None
+                        else None
+                    )
+                    interest_map_client = make_live_client(
+                        model=args.proxy_model,
+                        provider=args.proxy_provider,
+                        base_url=args.proxy_base_url,
+                        api_key=args.proxy_api_key,
+                        temperature=args.proxy_temperature,
+                        max_tokens=args.interest_map_max_tokens,
+                        timeout=args.timeout,
+                        cache=llm_cache,
+                        cache_mode=args.llm_cache_mode,
+                        cache_stats=llm_cache_stats,
+                        llm_role="proxy",
+                    )
+                    if args.use_provisional_valuations:
+                        pv_client = make_live_client(
+                            model=args.proxy_model,
+                            provider=args.proxy_provider,
+                            base_url=args.proxy_base_url,
+                            api_key=args.proxy_api_key,
+                            temperature=args.proxy_temperature,
+                            max_tokens=args.pv_max_tokens,
+                            timeout=args.timeout,
+                            cache=llm_cache,
+                            cache_mode=args.llm_cache_mode,
+                            cache_stats=llm_cache_stats,
+                            llm_role="proxy",
+                        )
+                    _elicitation_cache[0] = compute_elicitation_cache(
+                        scenario=scenario,
+                        persons=_get_persons(),
+                        use_provisional_valuations=(
+                            args.use_provisional_valuations
+                        ),
+                        max_candidate_bundles=args.max_candidate_bundles,
+                        pv_client=pv_client,
+                        question_client=question_client,
+                        opening_question=(
+                            None
+                            if disclosure_pack is not None
+                            else _scenario_opening_question
+                        ),
+                        interest_map_client=interest_map_client,
+                        pv_chunk_size=args.pv_chunk_size,
+                        pv_failure_policy=args.pv_failure_policy,
+                        interest_map_failure_policy=(
+                            args.interest_map_failure_policy
+                        ),
+                        pv_max_tokens=args.pv_max_tokens,
+                        max_parse_retries=args.max_parse_retries,
+                        fixed_disclosures=(
+                            None
+                            if disclosure_pack is None
+                            else disclosure_pack.bidders
+                        ),
+                    )
+                    if args.write_elicitation_pack is not None:
+                        pack = build_frozen_elicitation_pack(
+                            scenario=scenario,
+                            entries=_elicitation_cache[0],
+                            scenario_spec_path=args.scenario_spec,
+                            selection_policy=args.selection_policy,
+                            person_model=(
+                                disclosure_pack.person_model
+                                if disclosure_pack is not None
+                                else ModelProvenance(
+                                    provider=args.person_provider,
+                                    model=args.person_model,
+                                    temperature=effective_model_temperature(
+                                        args.person_provider,
+                                        args.person_model,
+                                        args.person_temperature,
+                                    ),
+                                )
+                            ),
+                            proxy_model=ModelProvenance(
+                                provider=args.proxy_provider,
+                                model=args.proxy_model,
+                                temperature=effective_model_temperature(
+                                    args.proxy_provider,
+                                    args.proxy_model,
+                                    args.proxy_temperature,
+                                ),
+                            ),
+                            generation_settings={
+                                "use_interest_map": args.use_interest_map,
+                                "use_provisional_valuations": (
+                                    args.use_provisional_valuations
+                                ),
+                                "max_candidate_bundles": (
+                                    args.max_candidate_bundles
+                                ),
+                                "pv_chunk_size": args.pv_chunk_size,
+                                "pv_failure_policy": args.pv_failure_policy,
+                                "interest_map_failure_policy": (
+                                    args.interest_map_failure_policy
+                                ),
+                                "max_parse_retries": args.max_parse_retries,
+                                "opening_question_policy": (
+                                    "explicit"
+                                    if args.opening_question is not None
+                                    else args.opening_question_policy
+                                ),
+                                "fixed_disclosure_source": (
+                                    None
+                                    if args.disclosure_pack is None
+                                    else str(args.disclosure_pack)
+                                ),
+                                "opening_question": next(iter(
+                                    _elicitation_cache[0].values()
+                                )).nl_question,
+                                "verifier_provider": (
+                                    _scenario_verifier_provider
+                                ),
+                                "verifier_model": _scenario_verifier_model,
+                                "closed_world_interest_map": True,
+                                "deterministic_refinements_unscaled": True,
+                            },
+                            generation_calls=logger.records(),
+                        )
+                        write_frozen_elicitation_pack(
+                            pack, args.write_elicitation_pack
+                        )
+                        print(
+                            f"  frozen elicitation pack  → "
+                            f"{args.write_elicitation_pack}",
+                            flush=True,
+                        )
+                for bidder_id, entry in _elicitation_cache[0].items():
+                    stats = entry.pv_candidate_stats
+                    if stats is None:
+                        continue
+                    chunk_stats = entry.pv_chunk_stats or PvChunkStats(
+                        pv_chunk_size=args.pv_chunk_size,
+                        pv_chunks=0,
+                        candidate_count=stats.candidate_bundles_sent_to_pv,
+                        per_chunk_bundle_counts=(),
+                        chunking_used=False,
+                    )
+                    all_pv_candidate_bundle_stats_rows.append({
+                        "scenario": scenario.name,
+                        "bidder_id": bidder_id,
+                        "person_provider": args.person_provider,
+                        "person_model": args.person_model,
+                        "proxy_provider": args.proxy_provider,
+                        "proxy_model": args.proxy_model,
+                        **stats.as_dict(),
+                        **chunk_stats.as_dict(),
+                        "pv_degraded": entry.pv_degraded,
+                        "interest_map_interested_count": len(entry.interest_map.interested_items),
+                        "interest_map_excluded_count": len(entry.interest_map.excluded_items),
+                        "interest_map_substitute_group_count": len(entry.interest_map.substitute_groups),
+                        "interest_map_choose_one_group_count": sum(
+                            group.acquisition_mode == "choose_one"
+                            for group in entry.interest_map.substitute_groups
+                        ),
+                        "interest_map_can_use_multiple_group_count": sum(
+                            group.acquisition_mode == "can_use_multiple"
+                            for group in entry.interest_map.substitute_groups
+                        ),
+                        "interest_map_unclear_group_count": sum(
+                            group.acquisition_mode == "unclear"
+                            for group in entry.interest_map.substitute_groups
+                        ),
+                        "interest_map_complement_group_count": len(entry.interest_map.complementary_groups),
+                        "interest_map_candidate_count_before_filter": entry.interest_map_candidate_count_before_filter,
+                        "interest_map_candidate_count_after_filter": entry.interest_map_candidate_count_after_filter,
+                        "interest_map_fallback_used": entry.interest_map_fallback_used,
+                        "interest_map_quality_flags": "|".join(entry.interest_map_quality_flags),
+                        **{
+                            f"interest_map_accuracy_{key}": value
+                            for key, value in (
+                                entry.interest_map_accuracy or {}
+                            ).items()
+                            if not isinstance(value, (list, dict))
+                        },
+                        "interest_map_accuracy_details": json.dumps(
+                            entry.interest_map_accuracy or {},
+                            sort_keys=True,
+                        ),
+                        "pv_scale_quality_flags": "|".join(entry.pv_scale_quality_flags),
+                        "pv_inferred_max_value": entry.pv_inferred_max_value,
+                        "pv_ground_truth_max_value": entry.pv_ground_truth_max_value,
+                        "pv_max_value_ratio": entry.pv_max_value_ratio,
+                        "pv_inferred_max_singleton": entry.pv_inferred_max_singleton,
+                        "pv_ground_truth_max_singleton": entry.pv_ground_truth_max_singleton,
+                        "pv_max_singleton_ratio": entry.pv_max_singleton_ratio,
+                    })
             return _elicitation_cache[0]
+
+        _shared_direct_question = [_scenario_opening_question]
 
         def make_elicited_proxies(*, use_pv: bool = True):
             persons = _get_persons()
@@ -1452,7 +3320,11 @@ def main() -> None:
                     proxy = LlmInferredXorProxy(
                         bidder_id=bidder_id,
                         person=persons[bidder_id],
-                        epsilon=args.epsilon,
+                        calibration=calibration,
+                        # Inert once `calibration` is set; pinned to the
+                        # neutral 1.0 so the legacy field never reads as an
+                        # applied discount in downstream metadata.
+                        epsilon=1.0,
                     )
                     proxy.replay_elicitation(
                         nl_question=entry.nl_question,
@@ -1475,10 +3347,20 @@ def main() -> None:
                     proxy = LlmInferredXorProxy(
                         bidder_id=bidder_id,
                         person=person,
-                        epsilon=args.epsilon,
+                        calibration=calibration,
+                        # Inert once `calibration` is set; pinned to the
+                        # neutral 1.0 so the legacy field never reads as an
+                        # applied discount in downstream metadata.
+                        epsilon=1.0,
                     )
                     if args.ask_initial_question:
-                        proxy.ask_initial_question()
+                        proxy.ask_initial_question(
+                            question=_shared_direct_question[0]
+                        )
+                        if _shared_direct_question[0] is None:
+                            _shared_direct_question[0] = (
+                                proxy.nl_transcript[-1][0]
+                            )
                     return LlmAuctionProxyAdapter(
                         bidder_id=bidder_id,
                         proxy=proxy,
@@ -1532,25 +3414,61 @@ def main() -> None:
         _needs_elicited = (
             args.sealed_elicitation_rounds > 0
             or args.elicited_clock
-            or args.elicited_ceca
+            or args.prepare_elicitation_only
         ) and (args.use_interest_map or args.use_provisional_valuations)
 
         # Number of elicited arms that amortize the shared initial cost.
         _n_elicited_arms: int = (
             (1 if args.sealed_elicitation_rounds > 0 else 0)
             + (len(args.top_k) if args.elicited_clock else 0)
-            + (len(ceca_initial_bid_modes) * len(ceca_payment_rules) if args.elicited_ceca else 0)
         )
         _shared_tok_in: int = 0
         _shared_tok_out: int = 0
 
         if _needs_elicited:
             logger.mark()
-            _get_elicitation_cache()
-            _shared_initial_stats = logger.stats_since_mark()
+            _elicitation_cache_result = _get_elicitation_cache()
+            _shared_initial_stats = (
+                call_stats_from_records(
+                    frozen_pack.generation_calls,
+                    logical_cached_tokens=True,
+                )
+                if frozen_pack is not None
+                else logger.stats_since_mark()
+            )
             _shared_initial_row = _collect_initial_stats(_shared_initial_stats)
             _shared_tok_in = _shared_initial_row["tok_in"]
             _shared_tok_out = _shared_initial_row["tok_out"]
+            # pv_bidders/pv_chunks are PV/shared-initial accounting, never
+            # value or refinement queries: pv_bidders counts bidders with a
+            # (possibly degraded/zero) PV table, pv_chunks counts the total
+            # number of PV LLM calls actually made (1 per bidder unless
+            # --pv-chunk-size split some bidders into multiple chunk calls).
+            _pv_bidders = sum(
+                1 for e in _elicitation_cache_result.values()
+                if e.raw_pv_values is not None
+            )
+            _pv_chunks_total = sum(
+                e.pv_chunk_stats.pv_chunks
+                for e in _elicitation_cache_result.values()
+                if e.pv_chunk_stats is not None
+            )
+            _pv_degraded_bidders = sum(
+                1 for e in _elicitation_cache_result.values() if e.pv_degraded
+            )
+            if args.use_provisional_valuations:
+                _shared_initial_row["pv_bidders"] = _pv_bidders
+                _shared_initial_row["pv_chunks"] = _pv_chunks_total
+                _shared_initial_row["pv_degraded_bidders"] = _pv_degraded_bidders
+                _shared_initial_row["token_accounting_note"] = (
+                    f"{_shared_initial_row['token_accounting_note']}  "
+                    f"pv_bidders={_pv_bidders}  pv_chunks={_pv_chunks_total}"
+                    + (
+                        f"  pv_degraded={_pv_degraded_bidders}"
+                        if _pv_degraded_bidders
+                        else ""
+                    )
+                )
             _summary.append({
                 "scenario": scenario.name,
                 "arm": "shared initial (nl+im+pv)",
@@ -1559,6 +3477,16 @@ def main() -> None:
                 "full_info_welfare": float("nan"),
                 **_shared_initial_row,
             })
+
+        if args.prepare_elicitation_only:
+            continue
+
+        # Reused for allocation/pricing-witness annotations on every
+        # refinement record. This is deterministic and independent of
+        # whether the ordinary full-information baseline arm is skipped.
+        _full_info_witness_result = run_sealed_vcg_experiment(
+            scenario.instance
+        )
 
         def _amortized_shared() -> dict:
             """Per-arm share of the shared initial elicitation cost."""
@@ -1581,6 +3509,7 @@ def main() -> None:
             }
 
         mechanism = "sealed"
+        _sealed_comparison_true_welfare: float | None = None
         try:
             if not args.skip_baselines:
                 _section("sealed comparison")
@@ -1596,13 +3525,24 @@ def main() -> None:
                         api_key=args.api_key,
                         temperature=args.temperature,
                         max_tokens=args.max_tokens,
+                        person_nl_max_tokens=args.person_nl_max_tokens,
                         timeout=args.timeout,
                         logger=logger,
                         max_parse_retries=args.max_parse_retries,
-                        epsilon=args.epsilon,
+                        calibration=calibration,
                         ask_initial_question=args.ask_initial_question,
+                        opening_question=_scenario_opening_question,
                         use_ground_truth=args.ground_truth_queries,
                         verbose=args.verbose,
+                        cache=llm_cache,
+                        cache_mode=args.llm_cache_mode,
+                        cache_stats=llm_cache_stats,
+                        verifier_provider=_scenario_verifier_provider,
+                        verifier_model=_scenario_verifier_model,
+                        verifier_base_url=args.verifier_base_url,
+                        verifier_api_key=args.verifier_api_key,
+                        verifier_temperature=args.verifier_temperature,
+                        verifier_max_tokens=args.verifier_max_tokens,
                     ),
                     candidate_bundles=candidate_bundles,
                     candidate_bundles_by_bidder=candidate_bundles_by_bidder,
@@ -1611,6 +3551,7 @@ def main() -> None:
                 )
                 sealed_row = sealed_llm_comparison_to_row(sealed)
                 sealed_rows.append(sealed_row)
+                _sealed_comparison_true_welfare = sealed_row["llm_proxy_true_welfare"]
                 _arm_result(
                     "sealed comparison",
                     sealed_row["efficiency"],
@@ -1634,17 +3575,67 @@ def main() -> None:
                 _section("sealed proxy elicitation")
                 logger.mark()
                 _elicited = make_elicited_proxies()
-                proxy_sealed_result = run_proxy_sealed_vcg_experiment(
-                    instance=scenario.instance,
-                    proxies=list(_elicited.values()),
-                    config=ProxySealedConfig(
-                        elicitation_rounds=args.sealed_elicitation_rounds,
-                        feedback_rule=args.sealed_feedback_rule,
-                        max_refinements_per_bidder=(
-                            args.max_refinement_queries_per_bidder
-                        ),
+                _sealed_config = ProxySealedConfig(
+                    elicitation_rounds=args.sealed_elicitation_rounds,
+                    feedback_rule=args.sealed_feedback_rule,
+                    stopping_rule=args.sealed_stopping_rule,
+                    loser_challenger_policy=(
+                        args.sealed_loser_challenger_policy
+                    ),
+                    max_refinements_per_bidder=(
+                        args.max_refinement_queries_per_bidder
+                    ),
+                    max_total_refinements=args.max_total_refinement_queries,
+                    incumbent_verification=(
+                        args.event_incumbent_verification
+                    ),
+                    pivotal_challengers=args.event_pivotal_challengers,
+                    pivotal_gap_threshold=(
+                        args.event_pivotal_gap_threshold
+                    ),
+                    scarcity_fallbacks=args.event_scarcity_fallbacks,
+                    large_correction_followup=(
+                        args.sealed_event_large_correction_followup
+                    ),
+                    correction_followup_threshold=(
+                        args.event_correction_threshold
+                    ),
+                    terminal_regret_audit=(
+                        args.event_terminal_regret_audit
                     ),
                 )
+                if args.sealed_trajectory:
+                    _proxy_sealed_trajectory = run_proxy_sealed_vcg_trajectory(
+                        instance=scenario.instance,
+                        proxies=list(_elicited.values()),
+                        config=_sealed_config,
+                        logger=logger,
+                        late_reflection_config=late_reflection_config,
+                        late_reflection_client=late_reflection_client,
+                        scenario_name=scenario.name,
+                    )
+                    proxy_sealed_result = _proxy_sealed_trajectory[-1]
+
+                    _trajectory_rows = proxy_sealed_trajectory_to_rows(
+                        scenario_name=scenario.name,
+                        scenario_seed=_scenario_seed,
+                        num_goods=_scenario_num_goods,
+                        num_bidders=_scenario_num_bidders,
+                        instance=scenario.instance,
+                        trajectory=_proxy_sealed_trajectory,
+                        comparison_welfare=_sealed_comparison_true_welfare,
+                    )
+                    all_trajectory_rows.extend(_trajectory_rows)
+                    print_sealed_proxy_trajectory(_trajectory_rows)
+                else:
+                    proxy_sealed_result = run_proxy_sealed_vcg_experiment(
+                        instance=scenario.instance,
+                        proxies=list(_elicited.values()),
+                        config=_sealed_config,
+                        late_reflection_config=late_reflection_config,
+                        late_reflection_client=late_reflection_client,
+                        scenario_name=scenario.name,
+                    )
                 proxy_sealed_row = proxy_sealed_result_to_row(
                     instance_name=scenario.name,
                     instance=scenario.instance,
@@ -1661,6 +3652,18 @@ def main() -> None:
                 )
                 _proxy_sealed_stats = logger.stats_since_mark()
                 _ps_arm = _collect_arm_stats(_proxy_sealed_stats)
+                _ps_late_reflection_records = proxy_sealed_result.metadata.get(
+                    "late_reflection_records", []
+                )
+                _ps_late_reflection_candidates = proxy_sealed_result.metadata.get(
+                    "late_reflection_candidates", []
+                )
+                all_late_reflection_rows.extend(
+                    late_reflection_records_to_rows(_ps_late_reflection_records)
+                )
+                all_late_reflection_candidate_rows.extend(
+                    late_reflection_candidates_to_rows(_ps_late_reflection_candidates)
+                )
                 _summary.append({
                     "scenario": scenario.name,
                     "arm": "proxy sealed",
@@ -1669,9 +3672,28 @@ def main() -> None:
                     "full_info_welfare": proxy_sealed_row["full_info_welfare"],
                     "revenue": proxy_sealed_row["proxy_revenue"],
                     "surplus": proxy_sealed_row["proxy_true_welfare"] - proxy_sealed_row["proxy_revenue"],
+                    "requested_elicitation_rounds": proxy_sealed_row[
+                        "requested_elicitation_rounds"
+                    ],
+                    "actual_elicitation_rounds": proxy_sealed_row[
+                        "elicitation_rounds"
+                    ],
+                    "sealed_stopping_rule": proxy_sealed_row[
+                        "stopping_rule"
+                    ],
+                    "sealed_termination_reason": proxy_sealed_row[
+                        "termination_reason"
+                    ],
                     **_ps_arm,
                     **_amortized_shared(),
                     **_est_gt_tok(_ps_arm),
+                    **late_reflection_summary_fields(
+                        _ps_late_reflection_records,
+                        enabled=late_reflection_config.enabled,
+                        scope=late_reflection_config.scope,
+                        max_bidders=late_reflection_config.late_reflection_max_bidders,
+                        candidates=_ps_late_reflection_candidates,
+                    ),
                 })
                 print_refinement_records(
                     proxy_sealed_result.metadata["refinement_records_by_bidder"],
@@ -1686,6 +3708,18 @@ def main() -> None:
                         scenario.name,
                         f"proxy_sealed_{args.sealed_feedback_rule}",
                         proxy_sealed_result.metadata["refinement_records_by_bidder"],
+                        final_allocation=proxy_sealed_result.allocation,
+                        reported_vcg_counterfactuals=proxy_sealed_result.metadata[
+                            "vcg_counterfactuals"
+                        ],
+                        full_info_allocation=(
+                            _full_info_witness_result.allocation
+                        ),
+                        full_info_vcg_counterfactuals=(
+                            _full_info_witness_result.metadata[
+                                "vcg_counterfactuals"
+                            ]
+                        ),
                     )
                 )
                 if args.verbose:
@@ -1712,13 +3746,24 @@ def main() -> None:
                             api_key=args.api_key,
                             temperature=args.temperature,
                             max_tokens=args.max_tokens,
+                            person_nl_max_tokens=args.person_nl_max_tokens,
                             timeout=args.timeout,
                             logger=logger,
                             max_parse_retries=args.max_parse_retries,
-                            epsilon=args.epsilon,
+                            calibration=calibration,
                             ask_initial_question=args.ask_initial_question,
+                            opening_question=_scenario_opening_question,
                             use_ground_truth=args.ground_truth_queries,
                             verbose=args.verbose,
+                            cache=llm_cache,
+                            cache_mode=args.llm_cache_mode,
+                            cache_stats=llm_cache_stats,
+                            verifier_provider=_scenario_verifier_provider,
+                            verifier_model=_scenario_verifier_model,
+                            verifier_base_url=args.verifier_base_url,
+                            verifier_api_key=args.verifier_api_key,
+                            verifier_temperature=args.verifier_temperature,
+                            verifier_max_tokens=args.verifier_max_tokens,
                         ),
                         candidate_bundles=candidate_bundles,
                         candidate_bundles_by_bidder=(
@@ -1762,20 +3807,244 @@ def main() -> None:
                     _section(f"proxy clock  top_k={top_k}")
                     logger.mark()
                     _elicited = make_elicited_proxies()
-                    proxy_clock_result = run_proxy_clock_experiment(
-                        instance=scenario.instance,
-                        proxies=list(_elicited.values()),
-                        clock_config=cfg,
-                        proxy_config=ProxyClockConfig(
-                            top_k=top_k,
-                            elicited=True,
-                            margin_threshold=args.clock_margin_threshold,
-                            tie_threshold=args.clock_tie_threshold,
-                            max_refinements_per_bidder=(
-                                args.max_refinement_queries_per_bidder
-                            ),
+                    _resolved_clock_policy = args.resolved_event_policy[
+                        "clock"
+                    ]
+                    _clock_proxy_config = ProxyClockConfig(
+                        top_k=top_k,
+                        elicited=True,
+                        margin_threshold=args.clock_margin_threshold,
+                        tie_threshold=args.clock_tie_threshold,
+                        refine_top_k_frontier=(
+                            args.clock_refine_top_k_frontier
+                        ),
+                        top_k_frontier_policy=(
+                            args.clock_top_k_frontier_policy
+                        ),
+                        allocation_counterfactual_frontier=(
+                            args.clock_allocation_counterfactual_frontier
+                        ),
+                        max_refinements_per_bidder=(
+                            args.max_refinement_queries_per_bidder
+                        ),
+                        max_total_refinements=args.max_total_refinement_queries,
+                        incumbent_verification=(
+                            _resolved_clock_policy["incumbent_verification"]
+                        ),
+                        pivotal_challengers=(
+                            _resolved_clock_policy[
+                                "additional_pivotal_challengers"
+                            ]
+                        ),
+                        scarcity_fallbacks=_resolved_clock_policy[
+                            "scarcity_fallbacks"
+                        ],
+                        large_correction_followup=(
+                            args.clock_event_large_correction_followup
+                        ),
+                        correction_followup_threshold=(
+                            args.event_correction_threshold
+                        ),
+                        gate_near_zero_surplus=(
+                            args.event_gate_near_zero_surplus
+                        ),
+                        terminal_regret_audit=(
+                            args.event_terminal_regret_audit
+                        ),
+                        event_framework=args.clock_event_framework,
+                        supplementary_support_policy=(
+                            args.clock_supplementary_support_policy
+                        ),
+                        native_near_zero_surplus=(
+                            args.clock_native_near_zero_surplus
+                        ),
+                        native_demand_changed=(
+                            args.clock_native_demand_changed
+                        ),
+                        native_near_tie=args.clock_native_near_tie,
+                        frontier_winner_verification=(
+                            _resolved_clock_policy[
+                                "frontier_winner_verification"
+                            ]
+                        ),
+                        frontier_pivotal_challengers=(
+                            _resolved_clock_policy[
+                                "frontier_pivotal_challengers"
+                            ]
+                        ),
+                        frontier_winner_closure=(
+                            _resolved_clock_policy[
+                                "frontier_winner_closure"
+                            ]
+                        ),
+                        frontier_vcg_witness_verification=(
+                            _resolved_clock_policy[
+                                "frontier_vcg_witness_verification"
+                            ]
+                        ),
+                        frontier_vcg_single_pass=(
+                            _resolved_clock_policy[
+                                "frontier_vcg_single_pass"
+                            ]
+                        ),
+                        frontier_vcg_revealed_only=(
+                            _resolved_clock_policy[
+                                "frontier_vcg_revealed_only"
+                            ]
+                        ),
+                        frontier_staged_revealed_vcg_closure=(
+                            _resolved_clock_policy[
+                                "frontier_staged_revealed_vcg_closure"
+                            ]
+                        ),
+                        demand_switch_verification=(
+                            args.clock_event_demand_switch_verification
+                        ),
+                        contested_bundle_refinement=(
+                            args.clock_event_contested_bundle_refinement
+                        ),
+                        terminal_winner_verification=(
+                            args.clock_event_terminal_winner_verification
+                        ),
+                        terminal_vcg_witness_verification=(
+                            args.clock_event_terminal_vcg_witness_verification
+                        ),
+                        terminal_best_losing_challenger=(
+                            args.clock_event_terminal_best_losing_challenger
+                        ),
+                        allocation_change_audit=(
+                            _resolved_clock_policy[
+                                "allocation_change_audit"
+                            ]
+                        ),
+                        terminal_stability_audit=(
+                            args.clock_event_terminal_stability_audit
+                            if args.clock_event_terminal_stability_audit
+                            is not None
+                            else args.event_incumbent_verification
                         ),
                     )
+                    if args.clock_trajectory:
+                        _clock_trajectory = run_proxy_clock_trajectory(
+                            instance=scenario.instance,
+                            proxies=list(_elicited.values()),
+                            clock_config=cfg,
+                            proxy_config=_clock_proxy_config,
+                            scenario_name=scenario.name,
+                            scenario_seed=_scenario_seed,
+                            num_goods=_scenario_num_goods,
+                            num_bidders=_scenario_num_bidders,
+                            logger=logger,
+                            late_reflection_config=late_reflection_config,
+                            late_reflection_client=late_reflection_client,
+                        )
+                        proxy_clock_result = _clock_trajectory.final_result
+                        clock_round_rows_by_top_k[top_k].extend(
+                            _clock_trajectory.round_rows
+                        )
+                        clock_bidder_round_rows_by_top_k[top_k].extend(
+                            _clock_trajectory.bidder_round_rows
+                        )
+                        clock_coverage_rows_by_top_k[top_k].extend(
+                            _clock_trajectory.coverage_rows
+                        )
+                        clock_event_rows_by_top_k[top_k].extend(
+                            _clock_trajectory.event_rows
+                        )
+                        print_proxy_clock_trajectory(
+                            top_k, _clock_trajectory.round_rows
+                        )
+                        print_event_usefulness_summary(
+                            top_k, _clock_trajectory.event_rows
+                        )
+                        print(
+                            f"  failure_classification: "
+                            f"{_clock_trajectory.failure_classification}",
+                            flush=True,
+                        )
+                        _fi_nonempty = [
+                            r for r in _clock_trajectory.coverage_rows
+                            if r["full_info_winning_bundle_nonempty"]
+                        ]
+                        _fi_hits = sum(
+                            1 for r in _fi_nonempty if r["seen_in_top_k_by_final"]
+                        )
+                        _last_round = (
+                            _clock_trajectory.round_rows[-1]
+                            if _clock_trajectory.round_rows
+                            else {}
+                        )
+                        _best_final = _clock_trajectory.best_final
+                        _topk_comparison.append({
+                            "top_k": top_k,
+                            # true_welfare (ground-truth) is the correct
+                            # numerator for efficiency -- proxy_clock_result
+                            # .welfare is the proxy's *reported* welfare,
+                            # which can exceed full_info_welfare and must
+                            # never be used as the efficiency numerator.
+                            "true_welfare": _last_round.get(
+                                "finalise_true_welfare", float("nan")
+                            ),
+                            "reported_welfare": proxy_clock_result.welfare,
+                            "full_info_welfare": _last_round.get(
+                                "full_info_welfare", float("nan")
+                            ),
+                            "efficiency": _last_round.get(
+                                "finalise_global_efficiency", float("nan")
+                            ),
+                            "cumulative_value_queries": _last_round.get(
+                                "cumulative_value_queries", 0
+                            ),
+                            "cumulative_tokens_in": _last_round.get(
+                                "cumulative_tokens_in", 0
+                            ),
+                            "cumulative_tokens_out": _last_round.get(
+                                "cumulative_tokens_out", 0
+                            ),
+                            "supplementary_atoms_total": _last_round.get(
+                                "supplementary_atoms_total", 0
+                            ),
+                            "fi_winner_coverage_hits": _fi_hits,
+                            "fi_winner_coverage_total": len(_fi_nonempty),
+                            "failure_classification": (
+                                _clock_trajectory.failure_classification
+                            ),
+                            "best_true_welfare": _best_final.get("best_true_welfare"),
+                            "best_true_efficiency": _best_final.get(
+                                "best_true_efficiency"
+                            ),
+                            "best_round": _best_final.get("best_round"),
+                            "termination_reason": _best_final.get(
+                                "termination_reason"
+                            ),
+                        })
+                        _final_eff = _best_final.get("final_true_efficiency")
+                        _best_eff = _best_final.get("best_true_efficiency")
+                        if (
+                            _final_eff is not None
+                            and _best_eff is not None
+                            and _best_eff - _final_eff > 0.05
+                        ):
+                            print(
+                                f"  WARNING: top_k={top_k}  final clock allocation "
+                                f"is worse than best observed allocation "
+                                f"(best round {_best_final.get('best_round')} "
+                                f"eff={_pct(_best_eff)}, final round "
+                                f"{_best_final.get('final_round')} "
+                                f"eff={_pct(_final_eff)}); late reported-value "
+                                f"corrections may have changed the WDP.",
+                                flush=True,
+                            )
+                    else:
+                        proxy_clock_result = run_proxy_clock_experiment(
+                            instance=scenario.instance,
+                            proxies=list(_elicited.values()),
+                            clock_config=cfg,
+                            proxy_config=_clock_proxy_config,
+                            late_reflection_config=late_reflection_config,
+                            late_reflection_client=late_reflection_client,
+                            scenario_name=scenario.name,
+                        )
                     proxy_clock_row = proxy_clock_result_to_row(
                         instance_name=scenario.name,
                         instance=scenario.instance,
@@ -1795,6 +4064,18 @@ def main() -> None:
                     )
                     _proxy_clock_stats = logger.stats_since_mark()
                     _pc_arm = _collect_arm_stats(_proxy_clock_stats)
+                    _pc_late_reflection_records = proxy_clock_result.metadata.get(
+                        "late_reflection_records", []
+                    )
+                    _pc_late_reflection_candidates = proxy_clock_result.metadata.get(
+                        "late_reflection_candidates", []
+                    )
+                    all_late_reflection_rows.extend(
+                        late_reflection_records_to_rows(_pc_late_reflection_records)
+                    )
+                    all_late_reflection_candidate_rows.extend(
+                        late_reflection_candidates_to_rows(_pc_late_reflection_candidates)
+                    )
                     _summary.append({
                         "scenario": scenario.name,
                         "arm": f"proxy clock k={top_k}",
@@ -1806,6 +4087,13 @@ def main() -> None:
                         **_pc_arm,
                         **_amortized_shared(),
                         **_est_gt_tok(_pc_arm),
+                        **late_reflection_summary_fields(
+                            _pc_late_reflection_records,
+                            enabled=late_reflection_config.enabled,
+                            scope=late_reflection_config.scope,
+                            max_bidders=late_reflection_config.late_reflection_max_bidders,
+                            candidates=_pc_late_reflection_candidates,
+                        ),
                     })
                     print_refinement_records(
                         proxy_clock_result.metadata["refinement_records_by_bidder"],
@@ -1815,6 +4103,18 @@ def main() -> None:
                             scenario.name,
                             f"proxy_clock_k{top_k}",
                             proxy_clock_result.metadata["refinement_records_by_bidder"],
+                            final_allocation=proxy_clock_result.allocation,
+                            reported_vcg_counterfactuals=proxy_clock_result.metadata[
+                                "vcg_counterfactuals"
+                            ],
+                            full_info_allocation=(
+                                _full_info_witness_result.allocation
+                            ),
+                            full_info_vcg_counterfactuals=(
+                                _full_info_witness_result.metadata[
+                                    "vcg_counterfactuals"
+                                ]
+                            ),
                         )
                     )
                     if args.verbose:
@@ -1825,150 +4125,88 @@ def main() -> None:
                             _n_bidders,
                         )
 
-            if args.elicited_ceca:
-                mechanism = "proxy ceca"
-                _section("proxy ceca")
-                logger.mark()
-                if args.ceca_proxy_type in ("vd1", "vd2", "nvd"):
-                    _elicited = make_ceca_llm_proxies(
-                        scenario,
-                        persons=_get_persons(),
-                        proxy_client=make_live_client(
-                            model=args.model,
-                            provider=args.provider,
-                            base_url=args.base_url,
-                            api_key=args.api_key,
-                            temperature=args.temperature,
-                            max_tokens=args.max_tokens,
-                            timeout=args.timeout,
-                        ),
-                        ceca_proxy_type=args.ceca_proxy_type,
-                        max_bundle_size=args.max_bundle_size,
-                        gamma_refresh_every=args.gamma_refresh_every,
-                        nvd_num_questions=args.nvd_num_questions,
-                        max_parse_retries=args.max_parse_retries,
-                        logger=logger,
-                    )
-                elif args.ceca_proxy_type == "dnf":
-                    persons = _get_persons()
-                    _elicited = {
-                        bidder_id: DnfLearningProxy(
-                            bidder_id=bidder_id,
-                            person=person,
-                            items=list(scenario.instance.items),
-                        )
-                        for bidder_id, person in persons.items()
-                    }
-                else:
-                    _elicited = make_elicited_proxies(
-                        use_pv=not getattr(args, "ceca_no_pv", False)
-                    )
+            if args.elicited_clock and args.clock_trajectory:
+                print_topk_comparison(_topk_comparison)
 
-                _mode_labels = {"full_proxy": "prior", "singletons": "singletons", "empty": "empty"}
-                for _ceca_mode in ceca_initial_bid_modes:
-                    _variant_label = _mode_labels.get(_ceca_mode, _ceca_mode)
-                    _section(f"proxy ceca {_variant_label}  (elicitation)")
-                    logger.mark()
-                    # Run CECA once per mode — payment rules share the same run.
-                    _shared = run_proxy_ceca_elicitation(
-                        instance=scenario.instance,
-                        proxies=list(_elicited.values()),
-                        ceca_config=ceca_cfg,
-                        proxy_config=ProxyCecaConfig(
-                            payment_rule=ceca_payment_rules[0],
-                            initial_bid_mode=_ceca_mode,
-                            atomic_trimming=getattr(args, 'ceca_atomic_trimming', True),
-                            trim_value_tolerance=getattr(args, 'ceca_trim_value_tolerance', 0.0),
-                            stop_on_no_new_information=getattr(args, 'ceca_stop_on_no_new_information', False),
-                            stall_patience=getattr(args, 'ceca_stall_patience', 1),
-                            stop_on_round_no_useful_counterexamples=getattr(args, 'ceca_stop_on_round_no_useful_counterexamples', False),
-                            exhaust_repeated_bidders=getattr(args, 'ceca_exhaust_repeated_bidders', False),
-                            bidder_stall_patience=getattr(args, 'ceca_bidder_stall_patience', 3),
-                            ceca_demand_universe=getattr(args, 'ceca_demand_universe', 'all_items'),
-                            max_bundle_size=getattr(args, 'max_bundle_size', None),
-                        ),
-                    )
-                    _proxy_ceca_stats = logger.stats_since_mark()
-                    _ceca_arm = _collect_arm_stats(_proxy_ceca_stats)
-
-                    # Per-round satisfaction diagnostic (Task 2).
-                    for _diag_row in ceca_satisfaction_diagnostic_rows(_shared):
-                        ceca_satisfaction_diag_rows.append({
-                            "scenario": scenario.name,
-                            "mode": _ceca_mode,
-                            **_diag_row,
-                        })
-
-                    # Finalize with each payment rule — pure arithmetic, no LLM calls.
-                    _ceca_results = {
-                        rule: finalize_proxy_ceca_result(scenario.instance, _shared, rule)
-                        for rule in ceca_payment_rules
-                    }
-                    _print_ceca_payment_table(scenario.instance, _shared, _ceca_results)
-
-                    for payment_rule, proxy_ceca_result in _ceca_results.items():
-                        proxy_ceca_row = ceca_result_to_row(
-                            instance_name=scenario.name,
-                            instance=scenario.instance,
-                            result=proxy_ceca_result,
-                        )
-                        ceca_proxy_rows[(_ceca_mode, payment_rule)].append(proxy_ceca_row)
-                        ceca_winner_diagnostics.extend(
-                            ceca_winner_diagnostics_rows(
-                                instance_name=scenario.name,
-                                instance=scenario.instance,
-                                result=proxy_ceca_result,
-                            )
-                        )
-                        arm_label = f"proxy ceca {_variant_label} {payment_rule}"
-                        _arm_result(
-                            arm_label,
-                            proxy_ceca_row["efficiency"],
-                            proxy_ceca_row["proxy_true_welfare"],
-                            proxy_ceca_row["full_info_welfare"],
-                            extra=(
-                                f"rounds {proxy_ceca_result.rounds}  "
-                                f"converged={proxy_ceca_row['converged']}  "
-                                f"init_atoms={proxy_ceca_row['initial_manifest_total_atoms']}  "
-                                f"growth={proxy_ceca_row['manifest_growth_total']}  "
-                                f"queries {proxy_ceca_row['demand_query_count_by_bidder']}"
-                                + ("  [same CECA run]" if len(ceca_payment_rules) > 1 else "")
-                            ),
-                            reported_welfare=proxy_ceca_row["proxy_reported_welfare"],
-                        )
-                        _summary.append({
-                            "scenario": scenario.name,
-                            "arm": arm_label,
-                            "efficiency": proxy_ceca_row["efficiency"],
-                            "true_welfare": proxy_ceca_row["proxy_true_welfare"],
-                            "full_info_welfare": proxy_ceca_row["full_info_welfare"],
-                            "revenue": proxy_ceca_row["proxy_revenue"],
-                            "surplus": proxy_ceca_row["proxy_true_welfare"] - proxy_ceca_row["proxy_revenue"],
-                            **_ceca_arm,
-                            **_amortized_shared(),
-                            **_est_gt_tok(_ceca_arm),
-                        })
-                if args.verbose:
-                    print_arm_summary(
-                        "proxy ceca",
-                        _elicited,
-                        logger.stats_since_mark(),
-                        _n_bidders,
-                    )
         except Exception as exc:
             print(
                 f"Scenario {scenario.name}, mechanism {mechanism} failed: "
                 f"{exc}",
                 file=sys.stderr,
             )
-            if args.provider == "ollama":
-                print_ollama_help(args.model)
+            ollama_models = {
+                role_model
+                for role_provider, role_model in (
+                    (args.person_provider, args.person_model),
+                    (args.proxy_provider, args.proxy_model),
+                )
+                if role_provider == "ollama"
+            }
+            for ollama_model in sorted(ollama_models):
+                print_ollama_help(ollama_model)
             print(f"Logs were written to: {log_path}", file=sys.stderr)
             raise SystemExit(1) from exc
 
     # Summary table
     if _summary:
+        _cache_summary_fields = {
+            "person_disclosure_style": "brief_qualitative",
+            "person_query_mode": args.person_query_mode,
+            "person_provider": args.person_provider,
+            "person_model": args.person_model,
+            "person_temperature": args.person_temperature,
+            "proxy_provider": args.proxy_provider,
+            "proxy_model": args.proxy_model,
+            "proxy_temperature": args.proxy_temperature,
+            "llm_cache_mode": args.llm_cache_mode,
+            "llm_cache_path": args.llm_cache_path if llm_cache is not None else "",
+            **_calibration_fields,
+            **event_policy_summary_fields(args),
+            **llm_cache_stats.as_dict(),
+            **llm_role_summary_fields(logger),
+        }
+        if scenarios:
+            _environment_md = getattr(scenarios[0], "metadata", {}) or {}
+            _cache_summary_fields.update({
+                "environment_generation_provider": _environment_md.get(
+                    "environment_generation_provider"
+                ),
+                "environment_generation_model": _environment_md.get(
+                    "environment_generation_model"
+                ),
+            })
+        for _row in _summary:
+            _row.update(_cache_summary_fields)
         _print_results_table(_summary)
+        write_csv_variable_rows(_summary, run_summary_path)
+        print(f"  run summary CSV         →  {run_summary_path}")
+        if llm_cache is not None:
+            print(
+                f"  llm cache               →  hits={llm_cache_stats.hits}  "
+                f"misses={llm_cache_stats.misses}  writes={llm_cache_stats.writes}  "
+                f"read_only_misses={llm_cache_stats.read_only_misses}"
+            )
+
+    write_csv_variable_rows(
+        all_person_disclosure_rows,
+        person_disclosures_path,
+    )
+    print(f"  person disclosures CSV  →  {person_disclosures_path}")
+
+    if llm_cache is not None:
+        llm_cache.close()
+
+    # Every outcome CSV carries the effective calibration, so a detailed
+    # sealed/clock file read on its own still says how its values were
+    # produced.
+    for _rows in (
+        sealed_rows,
+        sealed_proxy_rows,
+        all_trajectory_rows,
+        *clock_rows_by_top_k.values(),
+        *clock_proxy_rows_by_top_k.values(),
+    ):
+        add_calibration_fields(_rows, calibration)
 
     # Write CSVs
     if sealed_rows:
@@ -1981,31 +4219,49 @@ def main() -> None:
     if args.sealed_elicitation_rounds > 0:
         write_csv(sealed_proxy_rows, sealed_proxy_path)
         print(f"  proxy sealed CSV        →  {sealed_proxy_path}")
+    if all_trajectory_rows:
+        write_csv(all_trajectory_rows, sealed_proxy_trajectory_path)
+        print(f"  proxy sealed trajectory →  {sealed_proxy_trajectory_path}")
+    if all_pv_candidate_bundle_stats_rows:
+        write_csv(all_pv_candidate_bundle_stats_rows, pv_candidate_bundle_stats_path)
+        print(f"  pv candidate bundle stats →  {pv_candidate_bundle_stats_path}")
     if args.elicited_clock:
         for top_k, rows in clock_proxy_rows_by_top_k.items():
             write_csv(rows, clock_proxy_paths[top_k])
             print(f"  proxy clock k={top_k} CSV    →  {clock_proxy_paths[top_k]}")
-    if args.elicited_ceca:
-        _mode_labels_out = {"full_proxy": "prior", "singletons": "singletons", "empty": "empty"}
-        for (mode, rule), rows in ceca_proxy_rows.items():
+    if args.elicited_clock and args.clock_trajectory:
+        for top_k, rows in clock_round_rows_by_top_k.items():
             if rows:
-                path = ceca_proxy_paths[(mode, rule)]
-                label = _mode_labels_out.get(mode, mode)
-                write_csv(rows, path)
-                print(f"  proxy ceca {label} {rule} CSV  →  {path}")
-        for mode in ceca_initial_bid_modes:
-            mode_diag = [r for r in ceca_winner_diagnostics if r.get("ceca_initial_bid_mode") == mode]
-            if mode_diag:
-                path = ceca_diagnostics_paths[mode]
-                write_csv(mode_diag, path)
-                print(f"  ceca value/payment diagnostics ({mode}) CSV  →  {path}")
-    if ceca_satisfaction_diag_rows:
-        sat_diag_path = log_dir / "curated_ceca_satisfaction_diagnostics.csv"
-        write_csv(ceca_satisfaction_diag_rows, sat_diag_path)
-        print(f"  ceca satisfaction diagnostics CSV  →  {sat_diag_path}")
+                write_csv(rows, clock_round_paths[top_k])
+                print(f"  clock rounds k={top_k} CSV   →  {clock_round_paths[top_k]}")
+        for top_k, rows in clock_bidder_round_rows_by_top_k.items():
+            if rows:
+                write_csv(rows, clock_bidder_round_paths[top_k])
+                print(
+                    f"  clock bidder-rounds k={top_k} CSV →  "
+                    f"{clock_bidder_round_paths[top_k]}"
+                )
+        for top_k, rows in clock_coverage_rows_by_top_k.items():
+            if rows:
+                write_csv(rows, clock_coverage_paths[top_k])
+                print(f"  clock coverage k={top_k} CSV →  {clock_coverage_paths[top_k]}")
+        for top_k, rows in clock_event_rows_by_top_k.items():
+            if rows:
+                write_csv(rows, clock_event_paths[top_k])
+                print(f"  clock events k={top_k} CSV   →  {clock_event_paths[top_k]}")
     if all_refinement_rows:
         write_csv(all_refinement_rows, refinement_path)
         print(f"  refinement records CSV  →  {refinement_path}")
+    if all_late_reflection_rows:
+        write_csv(all_late_reflection_rows, late_reflection_path)
+        print(f"  late reflection CSV     →  {late_reflection_path}")
+    if all_late_reflection_candidate_rows:
+        write_csv(all_late_reflection_candidate_rows, late_reflection_candidates_path)
+        print(
+            f"  late reflection candidates CSV →  "
+            f"{late_reflection_candidates_path}"
+        )
+    print(f"  run config JSON         →  {run_config_path}")
     print(f"  logs                    →  {log_path}")
 
 

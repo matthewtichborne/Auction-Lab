@@ -22,6 +22,7 @@ from auctionlab.proxies.elicitation import (
 _candidate_refinements = candidate_refinements
 _pivotality_score = pivotality_score
 from auctionlab.instances.base import make_demand_oracle
+from auctionlab.instances.base import DemandResponse
 from auctionlab.proxies.full_info import FullInfoAuctionProxy
 
 
@@ -344,6 +345,406 @@ def test_near_tie_event_carries_bundles_field(toy_instance):
             assert event.bundle in event.bundles
 
 
+def test_top_k_frontier_event_refines_newly_seen_demand_bundles(toy_instance):
+    proxies = [
+        _CapturingProxy(
+            bidder_id=bidder_id,
+            instance=toy_instance,
+            initial="all_atoms",
+        )
+        for bidder_id in toy_instance.bidder_ids
+    ]
+
+    result = run_proxy_clock_experiment(
+        toy_instance,
+        proxies,
+        ClockConfig(max_rounds=3, price_step=1.0, reserve=0.0),
+        ProxyClockConfig(
+            top_k=2,
+            elicited=True,
+            margin_threshold=0.0,
+            tie_threshold=0.0,
+            refine_top_k_frontier=True,
+            allocation_change_audit=False,
+            terminal_stability_audit=False,
+        ),
+    )
+
+    frontier_events = [
+        event
+        for proxy in proxies
+        for event in proxy.received_events
+        if event.event_type == "top_k_frontier"
+    ]
+    assert frontier_events
+    event_keys = [(event.bidder_id, event.bundle) for event in frontier_events]
+    assert len(event_keys) == len(set(event_keys))
+    assert result.metadata["refine_top_k_frontier"] is True
+
+
+def test_top_k_frontier_refinement_is_disabled_by_default(toy_instance):
+    proxies = [
+        _CapturingProxy(
+            bidder_id=bidder_id,
+            instance=toy_instance,
+            initial="all_atoms",
+        )
+        for bidder_id in toy_instance.bidder_ids
+    ]
+
+    result = run_proxy_clock_experiment(
+        toy_instance,
+        proxies,
+        ClockConfig(max_rounds=3, price_step=1.0, reserve=0.0),
+        ProxyClockConfig(
+            top_k=2,
+            elicited=True,
+            margin_threshold=0.0,
+            tie_threshold=0.0,
+            allocation_change_audit=False,
+            terminal_stability_audit=False,
+        ),
+    )
+
+    assert not [
+        event
+        for proxy in proxies
+        for event in proxy.received_events
+        if event.event_type == "top_k_frontier"
+    ]
+    assert result.metadata["refine_top_k_frontier"] is False
+
+
+def test_targeted_clock_exact_queries_are_unique_per_bidder_bundle(toy_instance):
+    proxies = [
+        _CapturingProxy(
+            bidder_id=bidder_id,
+            instance=toy_instance,
+            initial="all_atoms",
+        )
+        for bidder_id in toy_instance.bidder_ids
+    ]
+
+    result = run_proxy_clock_experiment(
+        toy_instance,
+        proxies,
+        ClockConfig(max_rounds=20, price_step=1.0, reserve=0.0),
+        ProxyClockConfig(
+            top_k=3,
+            elicited=True,
+            event_framework="targeted_v1",
+            demand_switch_verification=True,
+            contested_bundle_refinement=True,
+            allocation_change_audit=True,
+            terminal_winner_verification=True,
+            terminal_vcg_witness_verification=True,
+            terminal_best_losing_challenger=True,
+            terminal_stability_audit=False,
+        ),
+    )
+
+    keys = [
+        (bidder_id, record.bundle)
+        for bidder_id, records in result.metadata[
+            "refinement_records_by_bidder"
+        ].items()
+        for record in records
+    ]
+    assert len(keys) == len(set(keys))
+
+
+def test_demand_revealed_support_contains_only_clock_demands(toy_instance):
+    proxies = make_proxies(toy_instance, initial="all_atoms")
+
+    result = run_proxy_clock_experiment(
+        toy_instance,
+        proxies,
+        ClockConfig(max_rounds=20, price_step=1.0, reserve=0.0),
+        ProxyClockConfig(
+            top_k=1,
+            elicited=False,
+            supplementary_support_policy="demand_revealed",
+        ),
+    )
+
+    demanded = {bidder_id: set() for bidder_id in toy_instance.bidder_ids}
+    # Clock history stores every reported primary-demand bundle.
+    # A demand-revealed supplementary atom must have appeared there.
+    for round_record in result.metadata["clock_history"]:
+        for bidder_id, bundles in round_record.demands.items():
+            demanded[bidder_id].update(bundles)
+    for bidder_id, atoms in result.metadata["supplementary_bids"].items():
+        assert {atom.bundle for atom in atoms} <= demanded[bidder_id]
+
+
+class _SingleBundleDemandProxy(_CapturingProxy):
+    """Expose one demand while retaining a larger private candidate bid."""
+
+    def demand_at_prices(self, prices, round_idx=0, top_k=1):
+        bid = self.current_bid()
+        atom = bid.atoms[0]
+        return DemandResponse(
+            primary_bundle=atom.bundle,
+            primary_bundles=[atom.bundle],
+            supplementary_atoms=list(bid.atoms),
+        )
+
+
+def test_terminal_audit_does_not_leak_unrevealed_private_atoms(toy_instance):
+    proxies = [
+        _SingleBundleDemandProxy(
+            bidder_id=bidder_id,
+            instance=toy_instance,
+            initial="all_atoms",
+        )
+        for bidder_id in toy_instance.bidder_ids
+    ]
+    revealed = {
+        proxy.bidder_id: proxy.current_bid().atoms[0].bundle
+        for proxy in proxies
+    }
+
+    result = run_proxy_clock_experiment(
+        toy_instance,
+        proxies,
+        ClockConfig(max_rounds=2, price_step=1.0, reserve=0.0),
+        ProxyClockConfig(
+            top_k=1,
+            elicited=True,
+            event_framework="targeted_v1",
+            supplementary_support_policy="demand_revealed",
+            allocation_change_audit=False,
+            terminal_winner_verification=True,
+            terminal_vcg_witness_verification=True,
+            terminal_stability_audit=False,
+        ),
+    )
+
+    for bidder_id, atoms in result.metadata["supplementary_bids"].items():
+        assert {atom.bundle for atom in atoms} <= {revealed[bidder_id]}
+
+
+def test_native_clock_with_all_events_off_has_no_refinements(toy_instance):
+    proxies = [
+        _CapturingProxy(
+            bidder_id=bidder_id,
+            instance=toy_instance,
+            initial="all_atoms",
+        )
+        for bidder_id in toy_instance.bidder_ids
+    ]
+
+    result = run_proxy_clock_experiment(
+        toy_instance,
+        proxies,
+        ClockConfig(max_rounds=20, price_step=1.0, reserve=0.0),
+        ProxyClockConfig(
+            top_k=3,
+            elicited=True,
+            event_framework="native_v1",
+            native_near_zero_surplus=False,
+            native_demand_changed=False,
+            native_near_tie=False,
+            allocation_change_audit=False,
+            terminal_stability_audit=False,
+        ),
+    )
+
+    assert sum(
+        result.metadata["refinement_query_count_by_bidder"].values()
+    ) == 0
+    assert not [event for proxy in proxies for event in proxy.received_events]
+
+
+def test_native_clock_emits_only_original_price_path_events(toy_instance):
+    proxies = [
+        _CapturingProxy(
+            bidder_id=bidder_id,
+            instance=toy_instance,
+            initial="all_atoms",
+        )
+        for bidder_id in toy_instance.bidder_ids
+    ]
+
+    run_proxy_clock_experiment(
+        toy_instance,
+        proxies,
+        ClockConfig(max_rounds=20, price_step=1.0, reserve=0.0),
+        ProxyClockConfig(
+            top_k=3,
+            elicited=True,
+            event_framework="native_v1",
+            margin_threshold=1000.0,
+            tie_threshold=1000.0,
+            allocation_change_audit=False,
+            terminal_stability_audit=False,
+        ),
+    )
+
+    event_types = {
+        event.event_type for proxy in proxies for event in proxy.received_events
+    }
+    assert event_types
+    assert event_types <= {"near_zero_surplus", "demand_changed", "near_tie"}
+
+
+def test_frontier_clock_pv_only_makes_no_exact_queries(toy_instance):
+    proxies = [
+        _CapturingProxy(
+            bidder_id=bidder_id,
+            instance=toy_instance,
+            initial="all_atoms",
+        )
+        for bidder_id in toy_instance.bidder_ids
+    ]
+    result = run_proxy_clock_experiment(
+        toy_instance,
+        proxies,
+        ClockConfig(max_rounds=20, price_step=1.0, reserve=0.0),
+        ProxyClockConfig(
+            top_k=3,
+            elicited=True,
+            event_framework="frontier_v1",
+            supplementary_support_policy="demand_revealed",
+            allocation_change_audit=False,
+            terminal_stability_audit=False,
+        ),
+    )
+
+    assert sum(
+        result.metadata["refinement_query_count_by_bidder"].values()
+    ) == 0
+    assert not [event for proxy in proxies for event in proxy.received_events]
+
+
+def test_frontier_clock_queries_only_terminal_frontier_events(toy_instance):
+    proxies = [
+        _CapturingProxy(
+            bidder_id=bidder_id,
+            instance=toy_instance,
+            initial="all_atoms",
+        )
+        for bidder_id in toy_instance.bidder_ids
+    ]
+    result = run_proxy_clock_experiment(
+        toy_instance,
+        proxies,
+        ClockConfig(max_rounds=20, price_step=1.0, reserve=0.0),
+        ProxyClockConfig(
+            top_k=3,
+            elicited=True,
+            tie_threshold=1000.0,
+            event_framework="frontier_v1",
+            supplementary_support_policy="demand_revealed",
+            frontier_winner_verification=True,
+            frontier_pivotal_challengers=True,
+            frontier_winner_closure=True,
+            allocation_change_audit=False,
+            terminal_stability_audit=False,
+        ),
+    )
+
+    events = [event for proxy in proxies for event in proxy.received_events]
+    assert events
+    assert {event.event_type for event in events} <= {
+        "frontier_winner",
+        "frontier_pivotal_challenger",
+        "frontier_closure_winner",
+    }
+    keys = [(event.bidder_id, event.bundle) for event in events]
+    assert len(keys) == len(set(keys))
+    assert all(
+        event.round_idx == result.rounds for event in events
+    )
+
+
+def test_frontier_single_pass_freezes_witnesses_without_closure(toy_instance):
+    proxies = [
+        _CapturingProxy(
+            bidder_id=bidder_id,
+            instance=toy_instance,
+            initial="all_atoms",
+        )
+        for bidder_id in toy_instance.bidder_ids
+    ]
+    result = run_proxy_clock_experiment(
+        toy_instance,
+        proxies,
+        ClockConfig(max_rounds=20, price_step=1.0, reserve=0.0),
+        ProxyClockConfig(
+            top_k=3,
+            elicited=True,
+            tie_threshold=1000.0,
+            event_framework="frontier_v1",
+            supplementary_support_policy="all_atoms",
+            frontier_pivotal_challengers=True,
+            frontier_vcg_single_pass=True,
+            allocation_change_audit=False,
+            terminal_stability_audit=False,
+        ),
+    )
+
+    events = [event for proxy in proxies for event in proxy.received_events]
+    assert any(
+        event.event_type == "frontier_vcg_single_pass_all"
+        for event in events
+    )
+    assert not any(
+        event.event_type in {
+            "frontier_closure_winner", "frontier_vcg_witness"
+        }
+        for event in events
+    )
+    assert result.metadata["frontier_vcg_single_pass"] is True
+
+
+def test_frontier_vcg_closure_and_single_pass_are_exclusive():
+    with pytest.raises(ValueError, match="mutually exclusive"):
+        ProxyClockConfig(
+            frontier_vcg_witness_verification=True,
+            frontier_vcg_single_pass=True,
+        )
+
+
+def test_staged_revealed_vcg_closure_is_terminal_and_deduplicated(
+    toy_instance,
+):
+    proxies = [
+        _CapturingProxy(
+            bidder_id=bidder_id,
+            instance=toy_instance,
+            initial="all_atoms",
+        )
+        for bidder_id in toy_instance.bidder_ids
+    ]
+    result = run_proxy_clock_experiment(
+        toy_instance,
+        proxies,
+        ClockConfig(max_rounds=20, price_step=1.0, reserve=0.0),
+        ProxyClockConfig(
+            top_k=3,
+            elicited=True,
+            event_framework="frontier_v1",
+            supplementary_support_policy="all_atoms",
+            frontier_winner_closure=True,
+            frontier_staged_revealed_vcg_closure=True,
+            allocation_change_audit=False,
+            terminal_stability_audit=False,
+        ),
+    )
+
+    events = [event for proxy in proxies for event in proxy.received_events]
+    assert events
+    assert {event.event_type for event in events} <= {
+        "frontier_closure_winner",
+        "frontier_staged_revealed_vcg_witness",
+    }
+    keys = [(event.bidder_id, event.bundle) for event in events]
+    assert len(keys) == len(set(keys))
+    assert all(event.round_idx == result.rounds for event in events)
+    assert result.metadata["frontier_staged_revealed_vcg_closure"] is True
+
+
 # ---------------------------------------------------------------------------
 # Priority scoring tests
 # ---------------------------------------------------------------------------
@@ -503,3 +904,164 @@ def test_non_near_tie_events_have_no_bundles_field(toy_instance):
         assert event.bundles is None, (
             f"{event.event_type} event should not carry bundles"
         )
+
+
+def test_terminal_stability_audit_corrects_newly_exposed_winner():
+    from auctionlab.instances.base import AuctionInstance
+
+    instance = AuctionInstance(
+        items=["A"],
+        bidder_ids=["i1", "i2"],
+        valuations={
+            "i1": {frozenset({"A"}): 10.0},
+            "i2": {frozenset({"A"}): 90.0},
+        },
+    )
+    proxies = make_proxies(instance, initial="all_atoms")
+    for proxy, reported_value in zip(proxies, [100.0, 80.0]):
+        proxy.current_bid().atoms[0] = XorAtomicBid(
+            bundle=frozenset({"A"}),
+            value=reported_value,
+        )
+
+    result = run_proxy_clock_experiment(
+        instance,
+        proxies,
+        ClockConfig(max_rounds=1, price_step=1.0, reserve=0.0),
+        ProxyClockConfig(
+            top_k=1,
+            elicited=True,
+            margin_threshold=0.0,
+            tie_threshold=0.0,
+        ),
+    )
+
+    assert result.allocation["i2"] == frozenset({"A"})
+    assert result.metadata["terminal_stability_audit_queries"] == 2
+    assert result.metadata["terminal_stability_audit_iterations"] == 2
+    assert result.metadata["pre_terminal_revenue"] is not None
+    assert result.metadata["post_terminal_revenue"] == result.revenue
+
+
+def test_targeted_clock_uses_true_bidder_removal_vcg_witness():
+    from auctionlab.instances.base import AuctionInstance
+
+    instance = AuctionInstance(
+        items=["A"],
+        bidder_ids=["i1", "i2"],
+        valuations={
+            "i1": {frozenset({"A"}): 10.0},
+            "i2": {frozenset({"A"}): 9.0},
+        },
+    )
+    proxies = [
+        _CapturingProxy(
+            bidder_id=bidder_id,
+            instance=instance,
+            initial="all_atoms",
+        )
+        for bidder_id in instance.bidder_ids
+    ]
+    result = run_proxy_clock_experiment(
+        instance,
+        proxies,
+        ClockConfig(max_rounds=1, price_step=1.0),
+        ProxyClockConfig(
+            top_k=1,
+            elicited=True,
+            event_framework="targeted_v1",
+            allocation_change_audit=True,
+            terminal_stability_audit=False,
+            demand_switch_verification=True,
+            terminal_winner_verification=True,
+            terminal_vcg_witness_verification=True,
+        ),
+    )
+
+    event_types = [
+        event.event_type
+        for proxy in proxies
+        for event in proxy.received_events
+    ]
+    assert "terminal_winner" in event_types
+    assert "terminal_vcg_witness" in event_types
+    assert "near_zero_surplus" not in event_types
+    assert "near_tie" not in event_types
+    assert result.metadata["event_framework"] == "targeted_v1"
+
+
+def test_allocation_pivotal_frontier_only_fires_within_gap(toy_instance):
+    proxies = [
+        _CapturingProxy(
+            bidder_id=bidder_id,
+            instance=toy_instance,
+            initial="all_atoms",
+        )
+        for bidder_id in toy_instance.bidder_ids
+    ]
+
+    result = run_proxy_clock_experiment(
+        toy_instance,
+        proxies,
+        ClockConfig(max_rounds=1, price_step=1.0, reserve=0.0),
+        ProxyClockConfig(
+            top_k=2,
+            elicited=True,
+            margin_threshold=0.0,
+            tie_threshold=0.0,
+            top_k_frontier_policy="allocation_pivotal",
+            allocation_change_audit=False,
+            terminal_stability_audit=False,
+        ),
+    )
+
+    events = [
+        event
+        for proxy in proxies
+        for event in proxy.received_events
+        if event.event_type.startswith("allocation_pivotal_")
+    ]
+    assert events
+    assert all(event.allocation_gap is not None for event in events)
+    assert all(event.allocation_gap <= 0.0 for event in events)
+    assert result.metadata["top_k_frontier_policy"] == "allocation_pivotal"
+
+
+def test_initial_allocation_counterfactual_frontier_is_bounded(toy_instance):
+    proxies = [
+        _CapturingProxy(
+            bidder_id=bidder_id,
+            instance=toy_instance,
+            initial="all_atoms",
+        )
+        for bidder_id in toy_instance.bidder_ids
+    ]
+
+    result = run_proxy_clock_experiment(
+        toy_instance,
+        proxies,
+        ClockConfig(max_rounds=1, price_step=1.0, reserve=0.0),
+        ProxyClockConfig(
+            top_k=1,
+            elicited=True,
+            margin_threshold=0.0,
+            tie_threshold=0.0,
+            allocation_counterfactual_frontier=True,
+            terminal_stability_audit=False,
+        ),
+    )
+
+    counterfactual_events = [
+        event
+        for proxy in proxies
+        for event in proxy.received_events
+        if event.event_type == "allocation_counterfactual"
+    ]
+    assert counterfactual_events
+    assert len({
+        event.bidder_id for event in counterfactual_events
+    }) == len(counterfactual_events)
+    assert result.metadata["allocation_counterfactual_frontier"] is True
+    assert result.metadata[
+        "allocation_counterfactual_frontier_queries"
+    ] == len(counterfactual_events)

@@ -69,7 +69,9 @@ def run_sealed_vcg_experiment(instance: AuctionInstance) -> MechanismResult:
         revenue=sum(outcome.payments.values()),
         rounds=None,
         query_count=len(instance.bidder_ids),
-        metadata={},
+        metadata={
+            "vcg_counterfactuals": outcome.vcg_counterfactuals,
+        },
     )
 
 
@@ -108,6 +110,7 @@ def run_clock_supplementary_vcg_experiment(
             "supplementary_atoms": state.supplementary,
             "final_prices": state.prices,
             "top_k": top_k,
+            "vcg_counterfactuals": outcome.vcg_counterfactuals,
         },
     )
 

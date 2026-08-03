@@ -8,8 +8,8 @@ from typing import Callable, Dict, List, Tuple
 from auctionlab.auction_types import Bundle, ClockRoundRecord, Item
 from auctionlab.bids.xor import XorAtomicBid, XorBid
 from auctionlab.instances.base import DemandResponse
-from auctionlab.payments.vcg import compute_vcg_payments
-from auctionlab.solvers.wdp_ilp import solve_wdp_xor_ilp
+from auctionlab.payments.vcg import compute_vcg_payments_with_witnesses
+from auctionlab.solvers.wdp_ilp import WdpResult, solve_wdp_xor_ilp
 
 
 @dataclass(frozen=True)
@@ -38,6 +38,7 @@ class ClockSupplementaryOutcome:
     allocation: Dict[str, Bundle]
     welfare: float
     payments: Dict[str, float]
+    vcg_counterfactuals: Dict[str, WdpResult]
 
 
 DemandOracle = Callable[[str, Dict[Item, float]], DemandResponse]
@@ -252,10 +253,11 @@ def finalize_from_supplementary_vcg(
     ]
 
     full = solve_wdp_xor_ilp(items, bids)
-    payments = compute_vcg_payments(items, bids, full)
+    payment_result = compute_vcg_payments_with_witnesses(items, bids, full)
 
     return ClockSupplementaryOutcome(
         allocation=full.allocation,
         welfare=full.welfare,
-        payments=payments,
+        payments=payment_result.payments,
+        vcg_counterfactuals=payment_result.counterfactuals,
     )

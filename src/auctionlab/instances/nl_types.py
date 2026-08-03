@@ -14,7 +14,7 @@ from auctionlab.instances.base import AuctionInstance
 
 @dataclass(frozen=True)
 class NaturalLanguageAuctionScenario:
-    """An auction scenario with natural-language person seeds.
+    """An auction scenario with natural-language person disclosures.
 
     Attributes
     ----------
@@ -27,8 +27,10 @@ class NaturalLanguageAuctionScenario:
     item_descriptions:
         Per-item natural-language descriptions shown to LLM proxies.
     person_seeds:
-        Per-bidder natural-language seeds used to initialise each
-        :class:`~auctionlab.llm.person_simulator.LlmPersonSimulator`.
+        Per-bidder natural-language disclosures used to initialise each
+        :class:`~auctionlab.llm.person_simulator.LlmPersonSimulator`. For
+        structured scenarios these are brief and qualitative; exact values
+        remain in ``instance.valuations``.
     seed_type:
         ``"explicit"`` — seed enumerates bundle values explicitly;
         ``"implicit"`` — seed describes preferences without exact values;

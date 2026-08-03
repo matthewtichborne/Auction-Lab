@@ -1,0 +1,957 @@
+{
+  "generated_at": "2026-07-29T12:21:53.213429+00:00",
+  "status": "population_validation_failed",
+  "failure": null,
+  "design": "scenarios/pc_build_v2/population_design_16x16.json",
+  "output": "scenarios/pc_build_v3/pc_build_population_16x16.json",
+  "provider": "openai",
+  "model": "gpt-5.6-sol",
+  "temperature": null,
+  "requested_temperature": 0.0,
+  "reasoning_effort": "medium",
+  "max_tokens": 24000,
+  "timeout": 240.0,
+  "max_batch_repair_retries": 3,
+  "pricing": {
+    "input_cost_per_million_usd": 5.0,
+    "output_cost_per_million_usd": 30.0,
+    "as_of": "2026-07-29",
+    "source": "https://developers.openai.com/api/docs/models"
+  },
+  "max_estimated_cost_usd": 9.0,
+  "cumulative_estimated_cost_usd": 0.77947,
+  "batches": [
+    {
+      "batch": 1,
+      "bidder_ids": [
+        "enthusiast_gamer",
+        "value_gamer",
+        "streamer_creator",
+        "overclocker"
+      ],
+      "prompt": "scenarios/pc_build_v3/raw_generation/batch_01_prompt.txt",
+      "raw_response": "scenarios/pc_build_v3/raw_generation/batch_01_response.txt",
+      "archived_raw_response": null,
+      "response_source": "generated",
+      "attempts": [
+        {
+          "attempt": 1,
+          "kind": "initial",
+          "response_source": "reused",
+          "prompt": "scenarios/pc_build_v3/raw_generation/batch_01_prompt.txt",
+          "raw_response": "scenarios/pc_build_v3/raw_generation/batch_01_response.invalid_20260729T121749374451Z.txt",
+          "input_tokens": null,
+          "output_tokens": null,
+          "reasoning_tokens": null,
+          "total_tokens": null,
+          "finish_reason": null,
+          "latency_seconds": 0.0,
+          "estimated_cost_usd": 0.0,
+          "projected_max_cost_usd": 0.0,
+          "passed_validation": false,
+          "validation_error": "value_gamer: interest density invalid: has positive value for 14/16 goods (maximum 13 for this bidder/stratum)"
+        },
+        {
+          "attempt": 2,
+          "kind": "repair",
+          "repair_number": 1,
+          "response_source": "generated",
+          "prompt": "scenarios/pc_build_v3/raw_generation/batch_01_repair_01_prompt.txt",
+          "raw_response": "scenarios/pc_build_v3/raw_generation/batch_01_repair_01_response.txt",
+          "projected_max_cost_usd": 0.75613,
+          "input_tokens": 5344,
+          "output_tokens": 5085,
+          "reasoning_tokens": 2730,
+          "total_tokens": 10429,
+          "finish_reason": "stop",
+          "latency_seconds": 77.105,
+          "estimated_cost_usd": 0.17927,
+          "estimated_cost_source": "provider_usage",
+          "passed_validation": false,
+          "validation_error": "streamer_creator: monetary semantics invalid: saturation_penalty 4.6 is not a meaningful absolute-dollar penalty; expected at least 4.8 for this value scale"
+        },
+        {
+          "attempt": 3,
+          "kind": "repair",
+          "repair_number": 2,
+          "response_source": "generated",
+          "prompt": "scenarios/pc_build_v3/raw_generation/batch_01_repair_02_prompt.txt",
+          "raw_response": "scenarios/pc_build_v3/raw_generation/batch_01_repair_02_response.txt",
+          "projected_max_cost_usd": 0.756015,
+          "input_tokens": 5311,
+          "output_tokens": 2395,
+          "reasoning_tokens": 70,
+          "total_tokens": 7706,
+          "finish_reason": "stop",
+          "latency_seconds": 22.197,
+          "estimated_cost_usd": 0.098405,
+          "estimated_cost_source": "provider_usage",
+          "passed_validation": true
+        }
+      ],
+      "accepted_attempt": 3,
+      "status": "validated"
+    },
+    {
+      "batch": 2,
+      "bidder_ids": [
+        "student_builder",
+        "office_user",
+        "family_pc_buyer",
+        "minimalist_user"
+      ],
+      "prompt": "scenarios/pc_build_v3/raw_generation/batch_02_prompt.txt",
+      "raw_response": "scenarios/pc_build_v3/raw_generation/batch_02_response.txt",
+      "archived_raw_response": null,
+      "response_source": "generated",
+      "attempts": [
+        {
+          "attempt": 1,
+          "kind": "initial",
+          "response_source": "reused",
+          "prompt": "scenarios/pc_build_v3/raw_generation/batch_02_prompt.txt",
+          "raw_response": "scenarios/pc_build_v3/raw_generation/batch_02_response.invalid_20260729T121928688161Z.txt",
+          "input_tokens": null,
+          "output_tokens": null,
+          "reasoning_tokens": null,
+          "total_tokens": null,
+          "finish_reason": null,
+          "latency_seconds": 0.0,
+          "estimated_cost_usd": 0.0,
+          "projected_max_cost_usd": 0.0,
+          "passed_validation": false,
+          "validation_error": "student_builder: interest density invalid: has positive value for 16/16 goods (maximum 11 for this bidder/stratum)"
+        },
+        {
+          "attempt": 2,
+          "kind": "repair",
+          "repair_number": 1,
+          "response_source": "generated",
+          "prompt": "scenarios/pc_build_v3/raw_generation/batch_02_repair_01_prompt.txt",
+          "raw_response": "scenarios/pc_build_v3/raw_generation/batch_02_repair_01_response.txt",
+          "projected_max_cost_usd": 0.75806,
+          "input_tokens": 5753,
+          "output_tokens": 3514,
+          "reasoning_tokens": 1523,
+          "total_tokens": 9267,
+          "finish_reason": "stop",
+          "latency_seconds": 54.671,
+          "estimated_cost_usd": 0.134185,
+          "estimated_cost_source": "provider_usage",
+          "passed_validation": true
+        }
+      ],
+      "accepted_attempt": 2,
+      "status": "validated"
+    },
+    {
+      "batch": 3,
+      "bidder_ids": [
+        "ai_researcher",
+        "creative_professional",
+        "software_developer",
+        "data_analyst"
+      ],
+      "prompt": "scenarios/pc_build_v3/raw_generation/batch_03_prompt.txt",
+      "raw_response": "scenarios/pc_build_v3/raw_generation/batch_03_response.txt",
+      "archived_raw_response": null,
+      "response_source": "generated",
+      "attempts": [
+        {
+          "attempt": 1,
+          "kind": "initial",
+          "response_source": "reused",
+          "prompt": "scenarios/pc_build_v3/raw_generation/batch_03_prompt.txt",
+          "raw_response": "scenarios/pc_build_v3/raw_generation/batch_03_response.invalid_20260729T122023364762Z.txt",
+          "input_tokens": null,
+          "output_tokens": null,
+          "reasoning_tokens": null,
+          "total_tokens": null,
+          "finish_reason": null,
+          "latency_seconds": 0.0,
+          "estimated_cost_usd": 0.0,
+          "projected_max_cost_usd": 0.0,
+          "passed_validation": false,
+          "validation_error": "software_developer: interest density invalid: has positive value for 14/16 goods (maximum 13 for this bidder/stratum)"
+        },
+        {
+          "attempt": 2,
+          "kind": "repair",
+          "repair_number": 1,
+          "response_source": "generated",
+          "prompt": "scenarios/pc_build_v3/raw_generation/batch_03_repair_01_prompt.txt",
+          "raw_response": "scenarios/pc_build_v3/raw_generation/batch_03_repair_01_response.txt",
+          "projected_max_cost_usd": 0.763165,
+          "input_tokens": 6620,
+          "output_tokens": 2885,
+          "reasoning_tokens": 289,
+          "total_tokens": 9505,
+          "finish_reason": "stop",
+          "latency_seconds": 30.479,
+          "estimated_cost_usd": 0.11965,
+          "estimated_cost_source": "provider_usage",
+          "passed_validation": false,
+          "validation_error": "data_analyst: interest density invalid: has positive value for 14/16 goods (maximum 13 for this bidder/stratum)"
+        },
+        {
+          "attempt": 3,
+          "kind": "repair",
+          "repair_number": 2,
+          "response_source": "generated",
+          "prompt": "scenarios/pc_build_v3/raw_generation/batch_03_repair_02_prompt.txt",
+          "raw_response": "scenarios/pc_build_v3/raw_generation/batch_03_repair_02_response.txt",
+          "projected_max_cost_usd": 0.76312,
+          "input_tokens": 6613,
+          "output_tokens": 2897,
+          "reasoning_tokens": 311,
+          "total_tokens": 9510,
+          "finish_reason": "stop",
+          "latency_seconds": 27.842,
+          "estimated_cost_usd": 0.119975,
+          "estimated_cost_source": "provider_usage",
+          "passed_validation": true
+        }
+      ],
+      "accepted_attempt": 3,
+      "status": "validated"
+    },
+    {
+      "batch": 4,
+      "bidder_ids": [
+        "component_reseller",
+        "small_business_it",
+        "home_server_operator",
+        "system_integrator"
+      ],
+      "prompt": "scenarios/pc_build_v3/raw_generation/batch_04_prompt.txt",
+      "raw_response": "scenarios/pc_build_v3/raw_generation/batch_04_response.txt",
+      "archived_raw_response": null,
+      "response_source": "generated",
+      "attempts": [
+        {
+          "attempt": 1,
+          "kind": "initial",
+          "response_source": "reused",
+          "prompt": "scenarios/pc_build_v3/raw_generation/batch_04_prompt.txt",
+          "raw_response": "scenarios/pc_build_v3/raw_generation/batch_04_response.invalid_20260729T122121696800Z.txt",
+          "input_tokens": null,
+          "output_tokens": null,
+          "reasoning_tokens": null,
+          "total_tokens": null,
+          "finish_reason": null,
+          "latency_seconds": 0.0,
+          "estimated_cost_usd": 0.0,
+          "projected_max_cost_usd": 0.0,
+          "passed_validation": false,
+          "validation_error": "home_server_operator: interest density invalid: has positive value for 14/16 goods (maximum 13 for this bidder/stratum)"
+        },
+        {
+          "attempt": 2,
+          "kind": "repair",
+          "repair_number": 1,
+          "response_source": "generated",
+          "prompt": "scenarios/pc_build_v3/raw_generation/batch_04_repair_01_prompt.txt",
+          "raw_response": "scenarios/pc_build_v3/raw_generation/batch_04_repair_01_response.txt",
+          "projected_max_cost_usd": 0.76732,
+          "input_tokens": 7369,
+          "output_tokens": 3038,
+          "reasoning_tokens": 198,
+          "total_tokens": 10407,
+          "finish_reason": "stop",
+          "latency_seconds": 31.51,
+          "estimated_cost_usd": 0.127985,
+          "estimated_cost_source": "provider_usage",
+          "passed_validation": true
+        }
+      ],
+      "accepted_attempt": 2,
+      "status": "validated"
+    }
+  ],
+  "population_coverage": {
+    "num_goods": 16,
+    "num_bidders": 16,
+    "per_good": {
+      "CPU_HI": {
+        "positive_bidders": [
+          "enthusiast_gamer",
+          "value_gamer",
+          "streamer_creator",
+          "overclocker",
+          "ai_researcher",
+          "creative_professional",
+          "software_developer",
+          "data_analyst",
+          "component_reseller",
+          "home_server_operator",
+          "system_integrator"
+        ],
+        "core_bidders": [
+          "enthusiast_gamer",
+          "streamer_creator",
+          "overclocker",
+          "ai_researcher",
+          "creative_professional",
+          "system_integrator"
+        ],
+        "positive_strata": [
+          "gaming_performance",
+          "professional_ai",
+          "reseller_procurement"
+        ]
+      },
+      "CPU_MID": {
+        "positive_bidders": [
+          "enthusiast_gamer",
+          "value_gamer",
+          "streamer_creator",
+          "overclocker",
+          "student_builder",
+          "office_user",
+          "family_pc_buyer",
+          "minimalist_user",
+          "ai_researcher",
+          "creative_professional",
+          "software_developer",
+          "data_analyst",
+          "component_reseller",
+          "small_business_it",
+          "home_server_operator",
+          "system_integrator"
+        ],
+        "core_bidders": [
+          "value_gamer",
+          "student_builder",
+          "software_developer",
+          "data_analyst",
+          "small_business_it",
+          "home_server_operator"
+        ],
+        "positive_strata": [
+          "budget_office",
+          "gaming_performance",
+          "professional_ai",
+          "reseller_procurement"
+        ]
+      },
+      "CPU_LO": {
+        "positive_bidders": [
+          "value_gamer",
+          "overclocker",
+          "student_builder",
+          "office_user",
+          "family_pc_buyer",
+          "minimalist_user",
+          "component_reseller",
+          "small_business_it",
+          "home_server_operator",
+          "system_integrator"
+        ],
+        "core_bidders": [
+          "office_user",
+          "family_pc_buyer",
+          "minimalist_user"
+        ],
+        "positive_strata": [
+          "budget_office",
+          "gaming_performance",
+          "reseller_procurement"
+        ]
+      },
+      "GPU_AI": {
+        "positive_bidders": [
+          "streamer_creator",
+          "overclocker",
+          "student_builder",
+          "office_user",
+          "minimalist_user",
+          "ai_researcher",
+          "creative_professional",
+          "data_analyst",
+          "component_reseller",
+          "system_integrator"
+        ],
+        "core_bidders": [
+          "student_builder",
+          "office_user",
+          "ai_researcher",
+          "creative_professional",
+          "component_reseller",
+          "system_integrator"
+        ],
+        "positive_strata": [
+          "budget_office",
+          "gaming_performance",
+          "professional_ai",
+          "reseller_procurement"
+        ]
+      },
+      "GPU_GAM_HI": {
+        "positive_bidders": [
+          "enthusiast_gamer",
+          "value_gamer",
+          "streamer_creator",
+          "overclocker",
+          "family_pc_buyer",
+          "ai_researcher",
+          "creative_professional",
+          "component_reseller",
+          "system_integrator"
+        ],
+        "core_bidders": [
+          "enthusiast_gamer",
+          "streamer_creator",
+          "overclocker",
+          "creative_professional",
+          "component_reseller"
+        ],
+        "positive_strata": [
+          "budget_office",
+          "gaming_performance",
+          "professional_ai",
+          "reseller_procurement"
+        ]
+      },
+      "GPU_VALUE": {
+        "positive_bidders": [
+          "enthusiast_gamer",
+          "value_gamer",
+          "student_builder",
+          "family_pc_buyer",
+          "software_developer",
+          "data_analyst",
+          "component_reseller",
+          "small_business_it",
+          "home_server_operator",
+          "system_integrator"
+        ],
+        "core_bidders": [
+          "value_gamer",
+          "family_pc_buyer",
+          "component_reseller",
+          "small_business_it",
+          "system_integrator"
+        ],
+        "positive_strata": [
+          "budget_office",
+          "gaming_performance",
+          "professional_ai",
+          "reseller_procurement"
+        ]
+      },
+      "RAM_128": {
+        "positive_bidders": [
+          "value_gamer",
+          "streamer_creator",
+          "student_builder",
+          "office_user",
+          "ai_researcher",
+          "creative_professional",
+          "software_developer",
+          "data_analyst",
+          "component_reseller",
+          "home_server_operator",
+          "system_integrator"
+        ],
+        "core_bidders": [
+          "streamer_creator",
+          "ai_researcher",
+          "creative_professional",
+          "data_analyst",
+          "component_reseller",
+          "home_server_operator",
+          "system_integrator"
+        ],
+        "positive_strata": [
+          "budget_office",
+          "gaming_performance",
+          "professional_ai",
+          "reseller_procurement"
+        ]
+      },
+      "RAM_64": {
+        "positive_bidders": [
+          "enthusiast_gamer",
+          "value_gamer",
+          "streamer_creator",
+          "overclocker",
+          "office_user",
+          "family_pc_buyer",
+          "ai_researcher",
+          "creative_professional",
+          "software_developer",
+          "data_analyst",
+          "component_reseller",
+          "small_business_it",
+          "home_server_operator",
+          "system_integrator"
+        ],
+        "core_bidders": [
+          "enthusiast_gamer",
+          "office_user",
+          "software_developer",
+          "small_business_it"
+        ],
+        "positive_strata": [
+          "budget_office",
+          "gaming_performance",
+          "professional_ai",
+          "reseller_procurement"
+        ]
+      },
+      "RAM_32": {
+        "positive_bidders": [
+          "enthusiast_gamer",
+          "value_gamer",
+          "streamer_creator",
+          "overclocker",
+          "student_builder",
+          "office_user",
+          "family_pc_buyer",
+          "minimalist_user",
+          "ai_researcher",
+          "software_developer",
+          "component_reseller",
+          "small_business_it",
+          "home_server_operator",
+          "system_integrator"
+        ],
+        "core_bidders": [
+          "value_gamer",
+          "student_builder",
+          "family_pc_buyer",
+          "minimalist_user"
+        ],
+        "positive_strata": [
+          "budget_office",
+          "gaming_performance",
+          "professional_ai",
+          "reseller_procurement"
+        ]
+      },
+      "MB_PRO": {
+        "positive_bidders": [
+          "enthusiast_gamer",
+          "streamer_creator",
+          "overclocker",
+          "student_builder",
+          "office_user",
+          "ai_researcher",
+          "creative_professional",
+          "software_developer",
+          "data_analyst",
+          "component_reseller",
+          "small_business_it",
+          "home_server_operator",
+          "system_integrator"
+        ],
+        "core_bidders": [
+          "enthusiast_gamer",
+          "streamer_creator",
+          "overclocker",
+          "ai_researcher",
+          "data_analyst",
+          "home_server_operator",
+          "system_integrator"
+        ],
+        "positive_strata": [
+          "budget_office",
+          "gaming_performance",
+          "professional_ai",
+          "reseller_procurement"
+        ]
+      },
+      "MB_STD": {
+        "positive_bidders": [
+          "enthusiast_gamer",
+          "value_gamer",
+          "overclocker",
+          "student_builder",
+          "office_user",
+          "family_pc_buyer",
+          "minimalist_user",
+          "software_developer",
+          "data_analyst",
+          "component_reseller",
+          "small_business_it",
+          "home_server_operator",
+          "system_integrator"
+        ],
+        "core_bidders": [
+          "value_gamer",
+          "student_builder",
+          "office_user",
+          "family_pc_buyer",
+          "minimalist_user",
+          "software_developer",
+          "small_business_it"
+        ],
+        "positive_strata": [
+          "budget_office",
+          "gaming_performance",
+          "professional_ai",
+          "reseller_procurement"
+        ]
+      },
+      "SSD_4TB": {
+        "positive_bidders": [
+          "enthusiast_gamer",
+          "streamer_creator",
+          "student_builder",
+          "family_pc_buyer",
+          "ai_researcher",
+          "creative_professional",
+          "software_developer",
+          "data_analyst",
+          "component_reseller",
+          "small_business_it",
+          "home_server_operator",
+          "system_integrator"
+        ],
+        "core_bidders": [
+          "streamer_creator",
+          "ai_researcher",
+          "creative_professional",
+          "data_analyst",
+          "home_server_operator",
+          "system_integrator"
+        ],
+        "positive_strata": [
+          "budget_office",
+          "gaming_performance",
+          "professional_ai",
+          "reseller_procurement"
+        ]
+      },
+      "SSD_2TB": {
+        "positive_bidders": [
+          "enthusiast_gamer",
+          "value_gamer",
+          "streamer_creator",
+          "overclocker",
+          "student_builder",
+          "office_user",
+          "family_pc_buyer",
+          "minimalist_user",
+          "ai_researcher",
+          "creative_professional",
+          "software_developer",
+          "data_analyst",
+          "component_reseller",
+          "small_business_it",
+          "home_server_operator",
+          "system_integrator"
+        ],
+        "core_bidders": [
+          "value_gamer",
+          "student_builder",
+          "office_user",
+          "family_pc_buyer",
+          "minimalist_user",
+          "software_developer",
+          "small_business_it"
+        ],
+        "positive_strata": [
+          "budget_office",
+          "gaming_performance",
+          "professional_ai",
+          "reseller_procurement"
+        ]
+      },
+      "PSU_1000": {
+        "positive_bidders": [
+          "enthusiast_gamer",
+          "value_gamer",
+          "streamer_creator",
+          "overclocker",
+          "student_builder",
+          "office_user",
+          "family_pc_buyer",
+          "ai_researcher",
+          "creative_professional",
+          "software_developer",
+          "data_analyst",
+          "component_reseller",
+          "small_business_it",
+          "home_server_operator",
+          "system_integrator"
+        ],
+        "core_bidders": [
+          "enthusiast_gamer",
+          "overclocker",
+          "component_reseller",
+          "small_business_it",
+          "home_server_operator",
+          "system_integrator"
+        ],
+        "positive_strata": [
+          "budget_office",
+          "gaming_performance",
+          "professional_ai",
+          "reseller_procurement"
+        ]
+      },
+      "COOL_AIO": {
+        "positive_bidders": [
+          "enthusiast_gamer",
+          "value_gamer",
+          "streamer_creator",
+          "overclocker",
+          "ai_researcher",
+          "creative_professional",
+          "software_developer",
+          "data_analyst",
+          "component_reseller",
+          "small_business_it",
+          "system_integrator"
+        ],
+        "core_bidders": [
+          "enthusiast_gamer",
+          "overclocker",
+          "system_integrator"
+        ],
+        "positive_strata": [
+          "gaming_performance",
+          "professional_ai",
+          "reseller_procurement"
+        ]
+      },
+      "CASE_ATX": {
+        "positive_bidders": [
+          "enthusiast_gamer",
+          "value_gamer",
+          "streamer_creator",
+          "overclocker",
+          "office_user",
+          "family_pc_buyer",
+          "minimalist_user",
+          "ai_researcher",
+          "creative_professional",
+          "software_developer",
+          "data_analyst",
+          "component_reseller",
+          "small_business_it",
+          "home_server_operator",
+          "system_integrator"
+        ],
+        "core_bidders": [
+          "value_gamer",
+          "overclocker",
+          "office_user",
+          "family_pc_buyer",
+          "minimalist_user",
+          "component_reseller",
+          "small_business_it",
+          "home_server_operator",
+          "system_integrator"
+        ],
+        "positive_strata": [
+          "budget_office",
+          "gaming_performance",
+          "professional_ai",
+          "reseller_procurement"
+        ]
+      }
+    },
+    "profiles_with_substitute_groups": 16,
+    "profiles_with_complement_groups": 16,
+    "nonpositive_substitute_items": {},
+    "multiway_substitute_categories": [
+      "cpu",
+      "gpu",
+      "ram"
+    ],
+    "backup_factors_by_bidder": {
+      "enthusiast_gamer": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "value_gamer": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "streamer_creator": [
+        0.0,
+        0.3,
+        0.0
+      ],
+      "overclocker": [
+        0.45,
+        0.45,
+        0.35
+      ],
+      "student_builder": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "office_user": [
+        0.0,
+        0.0
+      ],
+      "family_pc_buyer": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "minimalist_user": [
+        0.0
+      ],
+      "ai_researcher": [
+        0.0,
+        0.3,
+        0.0,
+        0.55
+      ],
+      "creative_professional": [
+        0.0,
+        0.45,
+        0.0,
+        0.7
+      ],
+      "software_developer": [
+        0.0,
+        0.0,
+        0.0,
+        0.6
+      ],
+      "data_analyst": [
+        0.0,
+        0.2,
+        0.0,
+        0.0,
+        0.65
+      ],
+      "component_reseller": [
+        0.85,
+        0.82,
+        0.88,
+        0.78,
+        0.8
+      ],
+      "small_business_it": [
+        0.32,
+        0.38,
+        0.28,
+        0.44
+      ],
+      "home_server_operator": [
+        0.48,
+        0.58,
+        0.34,
+        0.66
+      ],
+      "system_integrator": [
+        0.84,
+        0.8,
+        0.86,
+        0.76,
+        0.79
+      ]
+    },
+    "acquisition_modes_by_bidder": {
+      "enthusiast_gamer": [
+        "choose_one",
+        "choose_one",
+        "choose_one"
+      ],
+      "value_gamer": [
+        "choose_one",
+        "choose_one",
+        "choose_one"
+      ],
+      "streamer_creator": [
+        "choose_one",
+        "can_use_multiple",
+        "choose_one"
+      ],
+      "overclocker": [
+        "can_use_multiple",
+        "can_use_multiple",
+        "can_use_multiple"
+      ],
+      "student_builder": [
+        "choose_one",
+        "choose_one",
+        "choose_one"
+      ],
+      "office_user": [
+        "choose_one",
+        "choose_one"
+      ],
+      "family_pc_buyer": [
+        "choose_one",
+        "choose_one",
+        "choose_one"
+      ],
+      "minimalist_user": [
+        "choose_one"
+      ],
+      "ai_researcher": [
+        "choose_one",
+        "can_use_multiple",
+        "choose_one",
+        "can_use_multiple"
+      ],
+      "creative_professional": [
+        "choose_one",
+        "can_use_multiple",
+        "choose_one",
+        "can_use_multiple"
+      ],
+      "software_developer": [
+        "choose_one",
+        "choose_one",
+        "choose_one",
+        "can_use_multiple"
+      ],
+      "data_analyst": [
+        "choose_one",
+        "can_use_multiple",
+        "choose_one",
+        "choose_one",
+        "can_use_multiple"
+      ],
+      "component_reseller": [
+        "can_use_multiple",
+        "can_use_multiple",
+        "can_use_multiple",
+        "can_use_multiple",
+        "can_use_multiple"
+      ],
+      "small_business_it": [
+        "can_use_multiple",
+        "can_use_multiple",
+        "can_use_multiple",
+        "can_use_multiple"
+      ],
+      "home_server_operator": [
+        "can_use_multiple",
+        "can_use_multiple",
+        "can_use_multiple",
+        "can_use_multiple"
+      ],
+      "system_integrator": [
+        "can_use_multiple",
+        "can_use_multiple",
+        "can_use_multiple",
+        "can_use_multiple",
+        "can_use_multiple"
+      ]
+    },
+    "monetary_semantic_violations": {},
+    "interest_density_violations": {},
+    "population_interest_density": 0.78125,
+    "max_population_interest_density": 0.8,
+    "violations": [
+      "good CPU_MID has 16 positive bidders (maximum 14)",
+      "good SSD_2TB has 16 positive bidders (maximum 14)",
+      "good PSU_1000 has 15 positive bidders (maximum 14)",
+      "good CASE_ATX has 15 positive bidders (maximum 14)"
+    ],
+    "passed": false
+  },
+  "sample_validation": null
+}

@@ -156,3 +156,5 @@ def test_clock_supplementary_vcg_matches_expected_outcome(
         "i2": 1.0,
         "i3": 13.0,
     }
+    assert set(outcome.vcg_counterfactuals) == {"i1", "i2", "i3"}
+    assert outcome.vcg_counterfactuals["i3"].welfare == 22.0

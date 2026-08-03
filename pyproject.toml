@@ -6,6 +6,7 @@ build-backend = "setuptools.build_meta"
 name = "auctionlab"
 version = "0.1.0"
 dependencies = [
+    "matplotlib>=3.8",
     "openai>=1.0.0",
     "ortools>=9.7",
     "pydantic>=2.0",
@@ -15,6 +16,7 @@ dependencies = [
 where = ["src"]
 
 [tool.pytest.ini_options]
-pythonpath = ["src"]
+pythonpath = ["src", "."]
 testpaths = ["tests"]
 addopts = "--import-mode=importlib"
+norecursedirs = ["legacy"]

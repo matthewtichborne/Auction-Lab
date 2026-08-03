@@ -2,7 +2,11 @@ from __future__ import annotations
 
 import json
 
-from auctionlab.llm.logging import LlmCallLogger, LlmCallRecord
+from auctionlab.llm.logging import (
+    LlmCallLogger,
+    LlmCallRecord,
+    call_stats_from_records,
+)
 from auctionlab.llm.schemas import LlmValueResponse
 
 
@@ -44,6 +48,19 @@ def test_logger_appends_multiple_records(tmp_path):
     assert len(lines) == 2
     assert json.loads(lines[0])["parsed_response"]["bundle_value"] == 10
     assert json.loads(lines[1])["parsed_response"]["bundle_value"] == 20
+
+
+def test_logger_can_start_a_fresh_run_without_stale_records(tmp_path):
+    path = tmp_path / "calls.jsonl"
+    path.write_text('{"stale": true}\n', encoding="utf-8")
+
+    logger = LlmCallLogger(path, append=False)
+
+    assert path.read_text(encoding="utf-8") == ""
+    logger.log(make_record({"bundle_value": 30}))
+    lines = path.read_text(encoding="utf-8").splitlines()
+    assert len(lines) == 1
+    assert json.loads(lines[0])["parsed_response"]["bundle_value"] == 30
 
 
 def test_logger_serializes_pydantic_response(tmp_path):
@@ -89,3 +106,29 @@ def test_record_with_token_counts_serialises_to_json(tmp_path):
     assert payload["input_tokens"] == 150
     assert payload["output_tokens"] == 42
     assert payload["total_tokens"] == 192
+
+
+def test_call_stats_from_records_uses_logical_cached_tokens():
+    stats = call_stats_from_records(
+        [
+            {
+                "prompt_type": "nl_question",
+                "success": True,
+                "input_tokens": 0,
+                "output_tokens": 0,
+                "cached_input_tokens": 700,
+                "cached_output_tokens": 120,
+            },
+            {
+                "prompt_type": "nl_question",
+                "success": False,
+                "input_tokens": 999,
+                "output_tokens": 999,
+            },
+        ],
+        logical_cached_tokens=True,
+    )
+
+    assert stats["nl_question"].calls == 1
+    assert stats["nl_question"].input_tokens == 700
+    assert stats["nl_question"].output_tokens == 120

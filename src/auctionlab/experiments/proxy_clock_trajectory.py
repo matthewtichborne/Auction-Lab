@@ -56,9 +56,11 @@ from auctionlab.experiments.export import allocation_to_str
 from auctionlab.experiments.proxy_clock_runner import (
     BidderRoundObservation,
     ProxyClockConfig,
+    _ClockAuditState,
     _BidderElicitationState,
     _build_clock_mechanism_result,
     _make_demand_oracle,
+    _terminal_stability_audit,
 )
 from auctionlab.experiments.runner import (
     MechanismResult,
@@ -66,6 +68,12 @@ from auctionlab.experiments.runner import (
     run_sealed_vcg_experiment,
 )
 from auctionlab.instances.base import AuctionInstance, bundle_price
+from auctionlab.llm.late_reflection import (
+    LateReflectionCandidateRecord,
+    LateReflectionConfig,
+    LateReflectionRecord,
+)
+from auctionlab.payments.vcg import vcg_witness_count
 from auctionlab.proxies.base import ClockAuctionProxy, clone_xor_bid
 
 # Possible values of `failure_classification` (see `classify_clock_failure`).
@@ -304,10 +312,19 @@ class _ClockTrajectoryRecorder:
             "price_of_bundle": price_of_bundle,
             "surplus_before": surplus_before,
             "surplus_after": surplus_after,
+            "reported_allocation_gap_before_query": (
+                "" if event.allocation_gap is None else event.allocation_gap
+            ),
             # Backfilled once the final/full-info allocations are known --
             # see `_backfill_event_allocation_columns`.
             "appears_in_final_allocation": None,
+            "reported_vcg_counterfactual_count": None,
+            "appears_in_reported_vcg_counterfactual": None,
+            "appears_in_any_reported_vcg_witness": None,
             "appears_in_full_info_allocation": None,
+            "full_info_vcg_counterfactual_count": None,
+            "appears_in_full_info_vcg_counterfactual": None,
+            "appears_in_any_full_info_vcg_witness": None,
         })
         self._event_row_refs.append((obs.bidder_id, event.bundle))
 
@@ -413,12 +430,34 @@ class _ClockTrajectoryRecorder:
         self._prev_tok_in, self._prev_tok_out = tok_in_total, tok_out_total
 
         events_this_round = [e for obs in observations.values() for e in obs.fired_events]
-        num_near_tie = sum(1 for e in events_this_round if e.event_type == "near_tie")
+        num_near_tie = sum(
+            1 for e in events_this_round if e.event_type.endswith("near_tie")
+        )
         num_near_zero = sum(
             1 for e in events_this_round if e.event_type == "near_zero_surplus"
         )
         num_demand_changed = sum(
-            1 for e in events_this_round if e.event_type == "demand_changed"
+            1
+            for e in events_this_round
+            if e.event_type.endswith("demand_changed")
+        )
+        num_top_k_frontier = sum(
+            1
+            for e in events_this_round
+            if e.event_type in {
+                "top_k_frontier",
+                "allocation_pivotal_top_k_frontier",
+            }
+        )
+        num_allocation_counterfactual = sum(
+            1
+            for e in events_this_round
+            if e.event_type == "allocation_counterfactual"
+        )
+        num_allocation_pivotal = sum(
+            1
+            for e in events_this_round
+            if e.event_type.startswith("allocation_pivotal_")
         )
 
         prices = next(iter(observations.values())).prices
@@ -438,7 +477,14 @@ class _ClockTrajectoryRecorder:
             "num_near_tie_events": num_near_tie,
             "num_near_zero_surplus_events": num_near_zero,
             "num_demand_changed_events": num_demand_changed,
+            "num_top_k_frontier_events": num_top_k_frontier,
+            "num_allocation_counterfactual_events": (
+                num_allocation_counterfactual
+            ),
+            "num_allocation_pivotal_events": num_allocation_pivotal,
             "num_refinements_this_round": len(events_this_round),
+            "terminal_stability_audit_queries": 0,
+            "terminal_stability_audit_iterations": 0,
             "new_value_queries": new_value_queries,
             "cumulative_value_queries": cum_value_queries,
             "new_demand_queries": new_demand_queries,
@@ -497,7 +543,7 @@ class _ClockTrajectoryRecorder:
             obs.previous_primary_bundle is not None
             and obs.previous_primary_bundle != obs.current_primary_bundle
         )
-        near_tie = any(c[1] == "near_tie" for c in obs.candidates)
+        near_tie = any(c[1].endswith("near_tie") for c in obs.candidates)
         near_zero_surplus = any(c[1] == "near_zero_surplus" for c in obs.candidates)
         event_types = sorted({e.event_type for e in obs.fired_events})
         refined_bundles = [sorted(e.bundle) for e in obs.fired_events if e.bundle]
@@ -556,18 +602,179 @@ class _ClockTrajectoryRecorder:
 
     # -- post-run -------------------------------------------------------
 
+    def apply_terminal_audit(
+        self,
+        *,
+        state,
+        audit_state: _ClockAuditState,
+    ) -> None:
+        """Reconcile the last diagnostic row with post-clock stability queries."""
+        if not self.round_rows or not audit_state.terminal_events:
+            return
+
+        self.supplementary = {
+            bidder_id: list(atoms)
+            for bidder_id, atoms in state.supplementary.items()
+        }
+        outcome = finalize_from_supplementary_vcg(
+            items=self.instance.items,
+            supplementary_atoms=self.supplementary,
+        )
+        true_welfare = true_welfare_for_allocation(
+            self.instance, outcome.allocation
+        )
+        previous_allocation = (
+            self._prev_finalise_allocation
+            if self._prev_finalise_allocation is not None
+            else {}
+        )
+        previous_welfare = self._prev_finalise_true_welfare
+        row = self.round_rows[-1]
+
+        stats_now = _stats_snapshot(self.proxies_by_bidder)
+        cum_value_queries, cum_demand_queries, _ = aggregate_query_counts(
+            self.logger, stats_now
+        )
+        extra_vq = cum_value_queries - self._prev_vq
+        row["num_events_this_round"] += len(audit_state.terminal_events)
+        row["num_refinements_this_round"] += len(audit_state.terminal_events)
+        row["new_value_queries"] += extra_vq
+        row["cumulative_value_queries"] = cum_value_queries
+        row["cumulative_demand_queries"] = cum_demand_queries
+        row["supplementary_atoms_total"] = sum(
+            len(atoms) for atoms in self.supplementary.values()
+        )
+        row["finalise_true_welfare"] = true_welfare
+        row["finalise_reported_welfare"] = outcome.welfare
+        row["finalise_global_efficiency"] = (
+            true_welfare / self.full_info.welfare
+            if self.full_info.welfare > 1e-9
+            else 1.0
+        )
+        row["finalise_mechanism_relative_efficiency"] = (
+            true_welfare / self.mechanism_full_info_welfare
+            if self.mechanism_full_info_welfare > 1e-9
+            else 1.0
+        )
+        revenue = sum(outcome.payments.values())
+        row["finalise_revenue"] = revenue
+        row["finalise_true_surplus"] = true_welfare - revenue
+        row["finalise_allocation_repr"] = allocation_to_str(
+            outcome.allocation
+        )
+        row["allocation_changed_from_previous_round"] = (
+            outcome.allocation != previous_allocation
+        )
+        row["welfare_delta_from_previous_round"] = (
+            0.0
+            if previous_welfare is None
+            else true_welfare - previous_welfare
+        )
+        row["terminal_stability_audit_queries"] = audit_state.terminal_queries
+        row["terminal_stability_audit_iterations"] = (
+            audit_state.terminal_iterations
+        )
+        for event in audit_state.terminal_events:
+            proxy = self.proxies_by_bidder[event.bidder_id]
+            match = next(
+                (
+                    record
+                    for record in reversed(proxy.refinement_records())
+                    if record.bundle == event.bundle
+                    and record.round_idx == event.round_idx
+                    and record.event_type == event.event_type
+                ),
+                None,
+            )
+            old_value = match.old_value if match is not None else None
+            new_value = match.new_value if match is not None else None
+            true_value = self.instance.value_of(
+                event.bidder_id, event.bundle
+            )
+            correction: float | str = (
+                new_value - (old_value if old_value is not None else 0.0)
+                if new_value is not None
+                else ""
+            )
+            bundle_cost = bundle_price(event.bundle, state.prices)
+            self.event_rows.append({
+                **self._row_context,
+                "round": len(state.history) + 1,
+                "bidder_id": event.bidder_id,
+                "event_type": event.event_type,
+                "target_bundle": _bundle_repr(event.bundle),
+                "old_reported_value": "" if old_value is None else old_value,
+                "new_reported_value": "" if new_value is None else new_value,
+                "true_value": true_value,
+                "signed_correction": correction,
+                "abs_correction": (
+                    abs(correction) if correction != "" else ""
+                ),
+                "price_of_bundle": bundle_cost,
+                "surplus_before": (
+                    old_value - bundle_cost
+                    if old_value is not None
+                    else ""
+                ),
+                "surplus_after": (
+                    new_value - bundle_cost
+                    if new_value is not None
+                    else ""
+                ),
+                "appears_in_final_allocation": None,
+                "reported_vcg_counterfactual_count": None,
+                "appears_in_reported_vcg_counterfactual": None,
+                "appears_in_any_reported_vcg_witness": None,
+                "appears_in_full_info_allocation": None,
+                "full_info_vcg_counterfactual_count": None,
+                "appears_in_full_info_vcg_counterfactual": None,
+                "appears_in_any_full_info_vcg_witness": None,
+            })
+            self._event_row_refs.append((event.bidder_id, event.bundle))
+        self._prev_vq = cum_value_queries
+        self._prev_dq = cum_demand_queries
+        self._prev_query_stats = stats_now
+        self._prev_finalise_allocation = dict(outcome.allocation)
+        self._prev_finalise_true_welfare = true_welfare
+
     def backfill_event_allocation_columns(
         self,
         *,
         final_allocation: dict[str, Bundle],
         full_info_allocation: dict[str, Bundle],
+        reported_vcg_counterfactuals: dict[str, Any],
+        full_info_vcg_counterfactuals: dict[str, Any],
     ) -> None:
         for row, (bidder_id, bundle) in zip(self.event_rows, self._event_row_refs):
-            row["appears_in_final_allocation"] = bool(bundle) and (
+            final_hit = bool(bundle) and (
                 final_allocation.get(bidder_id, frozenset()) == bundle
             )
-            row["appears_in_full_info_allocation"] = bool(bundle) and (
+            reported_count = vcg_witness_count(
+                reported_vcg_counterfactuals,
+                bidder_id,
+                bundle,
+            )
+            full_info_hit = bool(bundle) and (
                 full_info_allocation.get(bidder_id, frozenset()) == bundle
+            )
+            full_info_count = vcg_witness_count(
+                full_info_vcg_counterfactuals,
+                bidder_id,
+                bundle,
+            )
+            row["appears_in_final_allocation"] = final_hit
+            row["reported_vcg_counterfactual_count"] = reported_count
+            row["appears_in_reported_vcg_counterfactual"] = reported_count > 0
+            row["appears_in_any_reported_vcg_witness"] = (
+                final_hit or reported_count > 0
+            )
+            row["appears_in_full_info_allocation"] = full_info_hit
+            row["full_info_vcg_counterfactual_count"] = full_info_count
+            row["appears_in_full_info_vcg_counterfactual"] = (
+                full_info_count > 0
+            )
+            row["appears_in_any_full_info_vcg_witness"] = (
+                full_info_hit or full_info_count > 0
             )
 
     def build_coverage_rows(
@@ -806,6 +1013,8 @@ def run_proxy_clock_trajectory(
     num_goods: int | None = None,
     num_bidders: int | None = None,
     logger: Any | None = None,
+    late_reflection_config: LateReflectionConfig | None = None,
+    late_reflection_client: Any | None = None,
 ) -> ProxyClockTrajectory:
     """Run the proxy clock once, recording full round-by-round diagnostics.
 
@@ -861,11 +1070,21 @@ def run_proxy_clock_trajectory(
         ),
     )
 
+    late_reflection_records: list[LateReflectionRecord] = []
+    late_reflection_candidates: list[LateReflectionCandidateRecord] = []
+    audit_state = _ClockAuditState()
     demand_oracle = _make_demand_oracle(
         proxies_by_bidder=proxies_by_bidder,
         states=states,
         proxy_config=proxy_config,
         on_bidder_round=recorder.observe,
+        instance=instance,
+        late_reflection_config=late_reflection_config,
+        late_reflection_scenario_name=scenario_name,
+        late_reflection_records=late_reflection_records,
+        late_reflection_candidates=late_reflection_candidates,
+        late_reflection_client=late_reflection_client,
+        audit_state=audit_state,
     )
 
     state, _provisional = run_ascending_clock_with_supplementary(
@@ -874,6 +1093,15 @@ def run_proxy_clock_trajectory(
         demand_oracle=demand_oracle,
         cfg=clock_config,
     )
+    _terminal_stability_audit(
+        instance=instance,
+        proxies_by_bidder=proxies_by_bidder,
+        states=states,
+        proxy_config=proxy_config,
+        state=state,
+        audit_state=audit_state,
+    )
+    recorder.apply_terminal_audit(state=state, audit_state=audit_state)
 
     final_result = _build_clock_mechanism_result(
         instance=instance,
@@ -881,6 +1109,9 @@ def run_proxy_clock_trajectory(
         proxy_config=proxy_config,
         state=state,
         initial_bids=initial_bids,
+        late_reflection_records=late_reflection_records,
+        late_reflection_candidates=late_reflection_candidates,
+        audit_state=audit_state,
     )
 
     final_true_welfare = true_welfare_for_allocation(instance, final_result.allocation)
@@ -888,6 +1119,12 @@ def run_proxy_clock_trajectory(
     recorder.backfill_event_allocation_columns(
         final_allocation=final_result.allocation,
         full_info_allocation=full_info.allocation,
+        reported_vcg_counterfactuals=final_result.metadata[
+            "vcg_counterfactuals"
+        ],
+        full_info_vcg_counterfactuals=full_info.metadata[
+            "vcg_counterfactuals"
+        ],
     )
     coverage_rows = recorder.build_coverage_rows(
         final_allocation=final_result.allocation,

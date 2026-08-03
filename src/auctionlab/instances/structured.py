@@ -3,8 +3,9 @@
 Provides a modular pipeline for generating auction scenarios from latent
 bidder preference profiles:
 
-1. A hidden full valuation table (over all non-empty bundles) for evaluation.
-2. A budget-calibrated natural-language person seed for the LLM proxy.
+1. A hidden full valuation table (over all non-empty bundles) for evaluation
+   and deterministic value/demand-query answers.
+2. A brief qualitative disclosure for the simulated person's opening answer.
 
 Usage::
 
@@ -17,7 +18,7 @@ from __future__ import annotations
 import random
 from dataclasses import dataclass, field
 from itertools import combinations
-from typing import Optional, Sequence
+from typing import Literal, Optional, Sequence
 
 from auctionlab.instances.base import AuctionInstance
 from auctionlab.instances.nl_types import NaturalLanguageAuctionScenario
@@ -116,6 +117,7 @@ class SubstituteGroup:
 
     items: frozenset[str]
     backup_factor: float
+    acquisition_mode: Literal["choose_one", "can_use_multiple"] = "choose_one"
     description: str = ""
 
 
@@ -262,14 +264,8 @@ def enforce_monotonicity(
 
 
 # ---------------------------------------------------------------------------
-# Seed rendering
+# Brief qualitative disclosure rendering
 # ---------------------------------------------------------------------------
-
-def _price_range(value: float) -> str:
-    lo = max(10, round(value * 0.85 / 10) * 10)
-    hi = round(value * 1.15 / 10) * 10
-    return f"${lo:,.0f}–${hi:,.0f}"
-
 
 def _join_list(items: list[str]) -> str:
     if len(items) == 1:
@@ -279,103 +275,161 @@ def _join_list(items: list[str]) -> str:
     return ", ".join(items[:-1]) + f", and {items[-1]}"
 
 
-def render_budget_calibrated_seed(profile: BidderPreferenceProfile) -> str:
-    """Render a natural-language person seed from a BidderPreferenceProfile.
+_ITEM_DISCLOSURE_LABELS: dict[str, str] = {
+    # Current 16-good population.
+    "CPU_HI": "high-performance CPU",
+    "CPU_MID": "mid-range CPU",
+    "CPU_LO": "entry-level CPU",
+    "GPU_AI": "professional AI accelerator",
+    "GPU_GAM_HI": "high-end gaming graphics card",
+    "GPU_VALUE": "value-oriented graphics card",
+    "RAM_128": "128GB memory",
+    "RAM_64": "64GB memory",
+    "RAM_32": "32GB memory",
+    "MB_PRO": "professional motherboard",
+    "MB_STD": "mainstream motherboard",
+    "SSD_4TB": "4TB solid-state storage",
+    "SSD_2TB": "2TB solid-state storage",
+    "PSU_1000": "1000W power supply",
+    "COOL_AIO": "all-in-one liquid cooler",
+    "CASE_ATX": "ATX case",
+    # Legacy hard-coded catalogue.
+    "CPU_HIGH": "high-performance CPU",
+    "CPU_BUDGET": "mid-range CPU",
+    "GPU_HIGH": "high-end graphics card",
+    "GPU_MID": "mid-range graphics card",
+    "MOTHERBOARD": "motherboard",
+    "RAM_32GB": "32GB memory",
+    "RAM_64GB": "64GB memory",
+    "SSD_1TB": "1TB solid-state storage",
+    "PSU": "power supply",
+}
 
-    The seed includes role, budget range, approximate per-item price ranges
-    for core items, complement and substitute relationships, and
-    secondary/low-interest items.
 
-    Deliberately omits:
-    - Exact bundle values or complete valuation tables.
-    - List-formatted bundle enumerations (no "Single Item Bundles:" sections).
-    - Complement bonus magnitudes.
+def _disclosure_label(item: str) -> str:
+    return _ITEM_DISCLOSURE_LABELS.get(item, item.replace("_", " ").lower())
+
+
+def render_brief_qualitative_person_seed(
+    profile: BidderPreferenceProfile,
+    *,
+    identity_text: str | None = None,
+    available_goods: Sequence[str] | None = None,
+) -> str:
+    """Render the only person-facing seed used by structured scenarios.
+
+    The disclosure deliberately contains no singleton values, numerical
+    substitute factors, complement bonuses, saturation equations, or full
+    valuation recipe. It exposes a short, profile-aligned qualitative
+    description plus exactly one monetary figure: the maximum total
+    willingness to pay over the selected auction's goods.
+
+    Exact bundle values remain private in the scenario valuation table and
+    are answered through deterministic value/demand-query lookups.
     """
-    parts: list[str] = []
+    identity = (identity_text or profile.role).strip()
+    if identity and identity[-1] not in ".!?":
+        identity += "."
 
-    # Role and budget
-    lo, hi = profile.budget_range
-    parts.append(
-        f"{profile.role} "
-        f"Their overall budget for items in this auction is roughly "
-        f"${lo:,.0f}–${hi:,.0f}."
-    )
+    if available_goods is None:
+        referenced = (
+            set(profile.base_values)
+            | set(profile.core_items)
+            | set(profile.secondary_items)
+            | set(profile.low_interest_items)
+        )
+        available_ids = sorted(referenced)
+    else:
+        available_ids = list(available_goods)
+    available_set = set(available_ids)
+    positive = {
+        item
+        for item in available_ids
+        if profile.base_values.get(item, 0.0) > 0
+    }
 
-    if profile.notes:
-        parts.append(profile.notes)
+    parts = [identity] if identity else []
 
-    # Core items with approximate price ranges
-    core = sorted(profile.core_items & set(profile.base_values))
+    core = sorted(profile.core_items & available_set & positive)
+    secondary = sorted(profile.secondary_items & available_set & positive)
+    low = sorted(profile.low_interest_items & available_set & positive)
     if core:
-        item_strs = [
-            f"{item} (they would consider spending "
-            f"{_price_range(profile.base_values[item])})"
-            for item in core
-        ]
         parts.append(
-            "Their highest-priority items are " + _join_list(item_strs) + "."
+            "They are mainly interested in "
+            + _join_list([_disclosure_label(item) for item in core])
+            + "."
         )
-
-    # Complement relationships — prose only, no bonus values
-    for cg in profile.complement_groups:
-        available = [
-            i for i in PC_GOOD_CATALOG
-            if i in cg.items and i in profile.base_values
-        ]
-        if len(available) >= 2:
-            desc = cg.description or (
-                "owning the complete set is worth meaningfully more than the items separately"
-            )
-            last = available[-1]
-            rest = available[:-1]
-            parts.append(
-                f"The items {', '.join(rest)} and {last} work together as a "
-                f"complementary set — {desc}."
-            )
-
-    # Substitute relationships — framing depends on backup_factor
-    for sg in profile.substitute_groups:
-        available = [
-            i for i in PC_GOOD_CATALOG
-            if i in sg.items and i in profile.base_values
-        ]
-        if len(available) < 2:
-            continue
-
-        if sg.backup_factor >= 0.7:
-            # Near-independent value (reseller pattern): each item still valuable
-            desc = sg.description or "each item retains significant independent value"
-            parts.append(f"For {_join_list(available)}: {desc}.")
-        else:
-            # True substitute: one preferred, others are fallbacks
-            best = max(available, key=lambda i: profile.base_values[i])
-            others = [i for i in available if i != best]
-            desc = sg.description or "owning both adds limited extra value"
-            parts.append(
-                f"Regarding {_join_list(available)}: {best} is the preferred "
-                f"option but {_join_list(others)} can serve as a fallback — "
-                f"{desc}."
-            )
-
-    # Secondary items
-    secondary = sorted(profile.secondary_items & set(profile.base_values))
     if secondary:
-        sec_strs = [
-            f"{item} ({_price_range(profile.base_values[item])})"
-            for item in secondary
-        ]
         parts.append(
-            "They also have secondary interest in " + _join_list(sec_strs) + "."
+            "They would also consider "
+            + _join_list([_disclosure_label(item) for item in secondary])
+            + " as lower-priority options."
         )
-
-    # Low-interest items
-    low = sorted(profile.low_interest_items & set(profile.base_values))
     if low:
         parts.append(
-            "Items like " + _join_list(low) + " have limited value for their use case."
+            _join_list([_disclosure_label(item) for item in low]).capitalize()
+            + (" are less important to them." if len(low) > 1 else " is less important to them.")
+        )
+    classified = set(core) | set(secondary) | set(low)
+    other_positive = sorted(positive - classified)
+    if other_positive:
+        parts.append(
+            "They may also be interested in "
+            + _join_list(
+                [_disclosure_label(item) for item in other_positive]
+            )
+            + "."
         )
 
-    return "\n\n".join(parts)
+    for sg in profile.substitute_groups:
+        selected = [item for item in available_ids if item in sg.items & positive]
+        if len(selected) < 2:
+            continue
+        best = max(selected, key=lambda item: profile.base_values.get(item, 0.0))
+        alternatives = [item for item in selected if item != best]
+        labels = _join_list(
+            [_disclosure_label(item) for item in alternatives]
+        )
+        if sg.acquisition_mode == "choose_one":
+            parts.append(
+                f"They are choosing at most one from this set: they prefer "
+                f"{_disclosure_label(best)}, with {labels} as fallbacks. "
+                "Obtaining more than one would provide no meaningful "
+                "additional benefit."
+            )
+        else:
+            parts.append(
+                f"They prefer {_disclosure_label(best)}, while {labels} are "
+                "related alternatives. They can use, deploy, or resell more "
+                "than one, so additional items retain positive value."
+            )
+
+    for cg in profile.complement_groups:
+        selected = [item for item in available_ids if item in cg.items]
+        if len(selected) < 2:
+            continue
+        parts.append(
+            "They especially value obtaining "
+            + _join_list([_disclosure_label(item) for item in selected])
+            + " together."
+        )
+
+    excluded = sorted(available_set - positive)
+    if excluded:
+        parts.append(
+            "They are not interested in "
+            + _join_list([_disclosure_label(item) for item in excluded])
+            + "."
+        )
+
+    selected_table = generate_valuation_table(available_ids, profile)
+    selected_ceiling = max(selected_table.values(), default=0.0)
+    parts.append(
+        "Their maximum total willingness to pay in this auction is "
+        f"approximately ${selected_ceiling:,.0f}."
+    )
+
+    return " ".join(part for part in parts if part)
 
 
 # ---------------------------------------------------------------------------
@@ -392,12 +446,16 @@ def _sub_if_available(
     group_items: frozenset[str],
     backup_factor: float,
     description: str = "",
+    acquisition_mode: Literal[
+        "choose_one", "can_use_multiple"
+    ] = "choose_one",
 ) -> list[SubstituteGroup]:
     available = group_items & items
     if len(available) >= 2:
         return [SubstituteGroup(
             items=available,
             backup_factor=backup_factor,
+            acquisition_mode=acquisition_mode,
             description=description,
         )]
     return []
@@ -426,7 +484,7 @@ def make_competitive_gamer_profile(
         "CPU_BUDGET": 260, "GPU_MID": 450, "SSD_2TB": 170, "PSU": 190,
         "RAM_64GB": 130, "SSD_1TB": 140,
     }
-    bv = {item: _jitter(refs[item], rng) for item in items if item in refs}
+    bv = {item: _jitter(refs[item], rng) for item in sorted(items) if item in refs}
 
     sub_groups = (
         _sub_if_available(items, frozenset({"CPU_HIGH", "CPU_BUDGET"}), 0.08,
@@ -466,7 +524,7 @@ def make_budget_gamer_profile(
         "CPU_HIGH": 300, "GPU_HIGH": 320, "SSD_1TB": 150, "PSU": 160,
         "RAM_64GB": 110, "SSD_2TB": 160,
     }
-    bv = {item: _jitter(refs[item], rng) for item in items if item in refs}
+    bv = {item: _jitter(refs[item], rng) for item in sorted(items) if item in refs}
 
     sub_groups = (
         _sub_if_available(items, frozenset({"CPU_BUDGET", "CPU_HIGH"}), 0.08,
@@ -511,7 +569,7 @@ def make_video_editor_profile(
         "SSD_1TB": 290, "MOTHERBOARD": 360, "PSU": 175, "GPU_HIGH": 280,
         "GPU_MID": 180, "CPU_BUDGET": 190,
     }
-    bv = {item: _jitter(refs[item], rng) for item in items if item in refs}
+    bv = {item: _jitter(refs[item], rng) for item in sorted(items) if item in refs}
 
     sub_groups = (
         _sub_if_available(items, frozenset({"RAM_64GB", "RAM_32GB"}), 0.25,
@@ -550,7 +608,7 @@ def make_ai_hobbyist_profile(
         "MOTHERBOARD": 270, "RAM_32GB": 200, "RAM_64GB": 240, "SSD_1TB": 180,
         "SSD_2TB": 220, "CPU_BUDGET": 190,
     }
-    bv = {item: _jitter(refs[item], rng) for item in items if item in refs}
+    bv = {item: _jitter(refs[item], rng) for item in sorted(items) if item in refs}
 
     sub_groups = _sub_if_available(
         items, frozenset({"GPU_HIGH", "GPU_MID"}), 0.08,
@@ -586,7 +644,7 @@ def make_office_upgrader_profile(
         "MOTHERBOARD": 150, "CPU_BUDGET": 110, "PSU": 80, "CPU_HIGH": 70,
         "GPU_MID": 55, "GPU_HIGH": 40,
     }
-    bv = {item: _jitter(refs[item], rng) for item in items if item in refs}
+    bv = {item: _jitter(refs[item], rng) for item in sorted(items) if item in refs}
 
     sub_groups = (
         _sub_if_available(items, frozenset({"SSD_2TB", "SSD_1TB"}), 0.20,
@@ -625,7 +683,7 @@ def make_overclocker_profile(
         "RAM_64GB": 290, "GPU_HIGH": 370, "GPU_MID": 240, "SSD_2TB": 200,
         "SSD_1TB": 170, "CPU_BUDGET": 175,
     }
-    bv = {item: _jitter(refs[item], rng) for item in items if item in refs}
+    bv = {item: _jitter(refs[item], rng) for item in sorted(items) if item in refs}
 
     sub_groups = _sub_if_available(
         items, frozenset({"CPU_HIGH", "CPU_BUDGET"}), 0.08,
@@ -664,18 +722,22 @@ def make_pc_reseller_profile(
         "CPU_BUDGET": 210, "GPU_MID": 310, "SSD_2TB": 170, "PSU": 130,
         "RAM_64GB": 195, "SSD_1TB": 120,
     }
-    bv = {item: _jitter(refs[item], rng) for item in items if item in refs}
+    bv = {item: _jitter(refs[item], rng) for item in sorted(items) if item in refs}
 
     # High backup factors: reseller can sell each unit separately
     sub_groups = (
         _sub_if_available(items, frozenset({"CPU_HIGH", "CPU_BUDGET"}), 0.88,
-                          "both CPUs can be listed separately; the duplicate retains nearly full resale value")
+                          "both CPUs can be listed separately; the duplicate retains nearly full resale value",
+                          acquisition_mode="can_use_multiple")
         + _sub_if_available(items, frozenset({"GPU_HIGH", "GPU_MID"}), 0.88,
-                            "both GPUs can be listed and sold separately")
+                            "both GPUs can be listed and sold separately",
+                            acquisition_mode="can_use_multiple")
         + _sub_if_available(items, frozenset({"RAM_64GB", "RAM_32GB"}), 0.85,
-                            "both RAM kits can be sold to different buyers")
+                            "both RAM kits can be sold to different buyers",
+                            acquisition_mode="can_use_multiple")
         + _sub_if_available(items, frozenset({"SSD_2TB", "SSD_1TB"}), 0.85,
-                            "both SSDs can be sold separately to different buyers")
+                            "both SSDs can be sold separately to different buyers",
+                            acquisition_mode="can_use_multiple")
     )
     comp_groups: list[ComplementGroup] = []
     if len(items) >= 6:
@@ -712,7 +774,7 @@ def make_student_builder_profile(
         "CPU_HIGH": 260, "GPU_HIGH": 280, "SSD_1TB": 160, "PSU": 130,
         "RAM_64GB": 130, "SSD_2TB": 140,
     }
-    bv = {item: _jitter(refs[item], rng) for item in items if item in refs}
+    bv = {item: _jitter(refs[item], rng) for item in sorted(items) if item in refs}
 
     sub_groups = (
         _sub_if_available(items, frozenset({"CPU_BUDGET", "CPU_HIGH"}), 0.08,
@@ -751,7 +813,7 @@ def make_small_business_buyer_profile(
         "SSD_2TB": 300, "SSD_1TB": 240, "PSU": 200, "GPU_MID": 175,
         "GPU_HIGH": 210, "CPU_BUDGET": 290,
     }
-    bv = {item: _jitter(refs[item], rng) for item in items if item in refs}
+    bv = {item: _jitter(refs[item], rng) for item in sorted(items) if item in refs}
 
     sub_groups = (
         _sub_if_available(items, frozenset({"CPU_HIGH", "CPU_BUDGET"}), 0.10,
@@ -790,7 +852,7 @@ def make_data_science_student_profile(
         "MOTHERBOARD": 275, "GPU_MID": 610, "RAM_32GB": 310, "SSD_1TB": 260,
         "PSU": 200, "CPU_BUDGET": 270,
     }
-    bv = {item: _jitter(refs[item], rng) for item in items if item in refs}
+    bv = {item: _jitter(refs[item], rng) for item in sorted(items) if item in refs}
 
     sub_groups = (
         _sub_if_available(items, frozenset({"GPU_HIGH", "GPU_MID"}), 0.10,
@@ -926,7 +988,10 @@ def make_pc_build_scenario(
 
     valuations = generate_full_valuations(items, profiles)
     person_seeds = {
-        p.bidder_id: render_budget_calibrated_seed(p)
+        p.bidder_id: render_brief_qualitative_person_seed(
+            p,
+            available_goods=items,
+        )
         for p in profiles
     }
 
@@ -935,11 +1000,20 @@ def make_pc_build_scenario(
             "budget_cap": p.budget_cap,
             "saturation_start": p.saturation_start,
             "saturation_penalty": p.saturation_penalty,
+            "disclosed_positive_items": sorted(
+                item
+                for item in items
+                if p.base_values.get(item, 0.0) > 0
+            ),
             "core_items": sorted(p.core_items),
             "secondary_items": sorted(p.secondary_items),
             "low_interest_items": sorted(p.low_interest_items),
             "substitute_groups": [
-                {"items": sorted(sg.items), "backup_factor": sg.backup_factor}
+                {
+                    "items": sorted(sg.items),
+                    "backup_factor": sg.backup_factor,
+                    "acquisition_mode": sg.acquisition_mode,
+                }
                 for sg in p.substitute_groups
             ],
             "complement_groups": [
@@ -969,7 +1043,7 @@ def make_pc_build_scenario(
             "full_valuation_table_size": 2 ** num_goods - 1,
             "domain": "pc_build",
             "valuation_model": "structured_substitutes_complements",
-            "seed_style": "budget_calibrated",
+            "seed_style": "brief_qualitative",
             "profiles": profile_metadata,
         },
     )

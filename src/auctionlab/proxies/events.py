@@ -42,6 +42,16 @@ CLOCK_NEAR_TIE = "clock_near_tie"
 CLOCK_NEAR_ZERO_SURPLUS = "clock_near_zero_surplus"
 CLOCK_DEMAND_CHANGED = "clock_demand_changed"
 
+# Late-stage reflective natural-language elicitation. Unlike the other
+# mechanism-facing events above (which target a specific bundle/value to
+# refine), this event asks the proxy to use accumulated auction context to
+# pose one targeted NL clarification near termination, then optionally
+# issue a small number of VQ/DQ follow-ups. See
+# auctionlab.llm.late_reflection for the orchestration logic; this module
+# only registers the event-type constant so it participates in the same
+# known-event-type bookkeeping as every other proxy event.
+LATE_REFLECTION = "late_reflection"
+
 # Set of all known event types — used by handle_event() to detect unknowns.
 _KNOWN_EVENT_TYPES: frozenset[str] = frozenset({
     INITIAL_PREFERENCE_QUESTION,
@@ -54,6 +64,7 @@ _KNOWN_EVENT_TYPES: frozenset[str] = frozenset({
     CLOCK_NEAR_TIE,
     CLOCK_NEAR_ZERO_SURPLUS,
     CLOCK_DEMAND_CHANGED,
+    LATE_REFLECTION,
 })
 
 # Initialisation events handled by the inner LlmInferredXorProxy.

@@ -68,6 +68,7 @@ class ElicitationEvent:
     bundles: tuple[Bundle, ...] | None = None
     prices: dict[Item, float] | None = None
     allocated_bundle: Bundle | None = None
+    allocation_gap: float | None = None
     reason: str | None = None
     round_idx: int | None = None
 
@@ -124,5 +125,4 @@ class SealedAuctionProxy(AuctionProxy, Protocol):
         forward the event to :meth:`refine`.
         """
         ...
-
 

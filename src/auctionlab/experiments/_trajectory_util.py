@@ -116,8 +116,7 @@ def refinement_cap_fields(
 
     Refinement count is meant to be an *outcome* of the elicitation events
     and mechanism, not a tuned quantity -- these caps only exist as safety
-    limits against runaway query volume (see
-    ``docs/parameter_tuning_methodology.md``). ``0`` means "no cap" for
+    limits against runaway query volume. ``0`` means "no cap" for
     either argument. Returns:
 
     - ``total_refinement_queries``: summed across all bidders.

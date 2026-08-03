@@ -1,0 +1,716 @@
+{
+  "calibration": {
+    "config": {
+      "budget_cap": true,
+      "family": "uniform",
+      "provenance": {
+        "accepted": true,
+        "domains": [
+          "camera_video_kit",
+          "kitchen_appliance_bundle",
+          "travel_package"
+        ],
+        "environment_count": 9,
+        "environment_instances": [
+          0,
+          1,
+          2
+        ],
+        "final_all_environment_objective": 0.18464151479026253,
+        "heldout_mean_calibrated_payment_objective": 0.2325456983145732,
+        "heldout_mean_raw_payment_objective": 0.28899383299772646,
+        "heldout_payment_case_count": 9,
+        "heldout_payment_cases_improved": 7,
+        "mean_efficiency_tolerance": 0.02,
+        "method": "three_domain_leave_one_instance_index_out",
+        "objective": "payment_error_over_optimum_welfare",
+        "selected_family": "uniform"
+      },
+      "scale": 1.4758,
+      "schema_version": "1",
+      "size_gamma": 1.0,
+      "size_threshold": 3
+    },
+    "effective_config_hash": "b07d2ebfe7863cda0771ca454a5836212cfe20b06910092f003dc1509a98ca0e",
+    "file_sha256": "b03aac118a4edb492306d5f161ac58d31903e524c5790b9a62cc2ba19bbaea65",
+    "path": "outputs/pv_calibration/validation/pv_calibration.json"
+  },
+  "clock": {
+    "max_rounds": 500,
+    "price_step": 50.0,
+    "tie_threshold": 100.0,
+    "top_k": 3
+  },
+  "dataset": {
+    "case_count": 95,
+    "elicitation_pack_dir": "outputs/elicitation_packs/scalability",
+    "fixed_size": 8,
+    "packs": [
+      {
+        "case": "goods_4x8",
+        "path": "outputs/elicitation_packs/scalability/seed_0/goods_4x8/frozen_elicitation.json",
+        "seed": 0,
+        "sha256": "c885a905267a0931d79c9684118c50f8607d62e3d9ea2a3f19a68c7278e9aa32"
+      },
+      {
+        "case": "goods_5x8",
+        "path": "outputs/elicitation_packs/scalability/seed_0/goods_5x8/frozen_elicitation.json",
+        "seed": 0,
+        "sha256": "830306559007bc95e8e698948122940872c3f6960ff3c1ada2c6ee858b6b1cd2"
+      },
+      {
+        "case": "goods_6x8",
+        "path": "outputs/elicitation_packs/scalability/seed_0/goods_6x8/frozen_elicitation.json",
+        "seed": 0,
+        "sha256": "fc6ab6068dd6db6c515e0f9bd10c69216def669001c3129448245dd216c235bd"
+      },
+      {
+        "case": "goods_7x8",
+        "path": "outputs/elicitation_packs/scalability/seed_0/goods_7x8/frozen_elicitation.json",
+        "seed": 0,
+        "sha256": "218860549d53670c9f11d714579a7b96de997b75decf6aea896c717df6cd2f51"
+      },
+      {
+        "case": "goods_9x8",
+        "path": "outputs/elicitation_packs/scalability/seed_0/goods_9x8/frozen_elicitation.json",
+        "seed": 0,
+        "sha256": "cef7eadcfce0e00acee15ed81498534d8ef003543b8319e45dc611127d4752be"
+      },
+      {
+        "case": "goods_10x8",
+        "path": "outputs/elicitation_packs/scalability/seed_0/goods_10x8/frozen_elicitation.json",
+        "seed": 0,
+        "sha256": "76f3483b30ffe1b6c871d0cf8ee863ac3ccaf17971b030170ec166dae3a04f52"
+      },
+      {
+        "case": "bidders_8x4",
+        "path": "outputs/elicitation_packs/scalability/seed_0/bidders_8x4/frozen_elicitation.json",
+        "seed": 0,
+        "sha256": "e3efdb0bd33d0af47b953c0817d24b3d8855683bfd0c8a98c3f7650218bbb90b"
+      },
+      {
+        "case": "bidders_8x5",
+        "path": "outputs/elicitation_packs/scalability/seed_0/bidders_8x5/frozen_elicitation.json",
+        "seed": 0,
+        "sha256": "121d6dbb88be975f733f97df7ecb0571e967ce0e74627982c7ab3d985297e1c0"
+      },
+      {
+        "case": "bidders_8x6",
+        "path": "outputs/elicitation_packs/scalability/seed_0/bidders_8x6/frozen_elicitation.json",
+        "seed": 0,
+        "sha256": "16c8ea1fd98fd0581049e58a662204adc3bd522f1ad41fee8e0436168a00ac3c"
+      },
+      {
+        "case": "bidders_8x7",
+        "path": "outputs/elicitation_packs/scalability/seed_0/bidders_8x7/frozen_elicitation.json",
+        "seed": 0,
+        "sha256": "d94abd804a1678c54df9edfee5dcc6bdb2a144021ad922dae5b6391229b7d146"
+      },
+      {
+        "case": "bidders_8x9",
+        "path": "outputs/elicitation_packs/scalability/seed_0/bidders_8x9/frozen_elicitation.json",
+        "seed": 0,
+        "sha256": "7833b3c492f53251358f207ffd2089b4733bafb8626d4b2674c37f799a02a469"
+      },
+      {
+        "case": "bidders_8x10",
+        "path": "outputs/elicitation_packs/scalability/seed_0/bidders_8x10/frozen_elicitation.json",
+        "seed": 0,
+        "sha256": "fda8850adab4cde182494c351a1979fcd437ef7fbd782b528d35632e62747276"
+      },
+      {
+        "case": "joint_4x4",
+        "path": "outputs/elicitation_packs/scalability/seed_0/joint_4x4/frozen_elicitation.json",
+        "seed": 0,
+        "sha256": "b72bdc009305008dc71d7af4ec6f29297f2d6183015ff9a9c443029b1d54825a"
+      },
+      {
+        "case": "joint_5x5",
+        "path": "outputs/elicitation_packs/scalability/seed_0/joint_5x5/frozen_elicitation.json",
+        "seed": 0,
+        "sha256": "8515ec1610d80b90b57d21179ae6670e196375767deeb84d7a9b7d2804a5cb46"
+      },
+      {
+        "case": "joint_6x6",
+        "path": "outputs/elicitation_packs/scalability/seed_0/joint_6x6/frozen_elicitation.json",
+        "seed": 0,
+        "sha256": "65db60e68618d017f5b476714c95754baa1695df9945be51b9882408f320e361"
+      },
+      {
+        "case": "joint_7x7",
+        "path": "outputs/elicitation_packs/scalability/seed_0/joint_7x7/frozen_elicitation.json",
+        "seed": 0,
+        "sha256": "5b2f3f7bdc04f412bfdc3165dc0d7b5d439ebc79881ecb9a9bc91347953d2646"
+      },
+      {
+        "case": "anchor_8x8",
+        "path": "outputs/elicitation_packs/scalability/seed_0/anchor_8x8/frozen_elicitation.json",
+        "seed": 0,
+        "sha256": "9706acac59d178bb3d0abbb6627e0cafbabd2ebb56ebabda1e3bfeced4e28200"
+      },
+      {
+        "case": "joint_9x9",
+        "path": "outputs/elicitation_packs/scalability/seed_0/joint_9x9/frozen_elicitation.json",
+        "seed": 0,
+        "sha256": "7843d884ce3e5c37267338a08ef3c19af38345d52eaee96d3b6b2eb65a0deb90"
+      },
+      {
+        "case": "joint_10x10",
+        "path": "outputs/elicitation_packs/scalability/seed_0/joint_10x10/frozen_elicitation.json",
+        "seed": 0,
+        "sha256": "381f294877838b357126bb60d467f1c5a1589d8839f7ab24aabf3072b2fbd01f"
+      },
+      {
+        "case": "goods_4x8",
+        "path": "outputs/elicitation_packs/scalability/seed_1/goods_4x8/frozen_elicitation.json",
+        "seed": 1,
+        "sha256": "f1ab912214937a5ed0cb598deeef3ad91d919ad5c8b40fd1808355528071348c"
+      },
+      {
+        "case": "goods_5x8",
+        "path": "outputs/elicitation_packs/scalability/seed_1/goods_5x8/frozen_elicitation.json",
+        "seed": 1,
+        "sha256": "2bc87028b9db006f80259171707c84f27740bc498e23ad8ea082dfc47eeccb03"
+      },
+      {
+        "case": "goods_6x8",
+        "path": "outputs/elicitation_packs/scalability/seed_1/goods_6x8/frozen_elicitation.json",
+        "seed": 1,
+        "sha256": "611d0be2707eb09dd24e3024809f40a30cf6ac01fee11bb4e3206170ce70446f"
+      },
+      {
+        "case": "goods_7x8",
+        "path": "outputs/elicitation_packs/scalability/seed_1/goods_7x8/frozen_elicitation.json",
+        "seed": 1,
+        "sha256": "ba2b80e6e0511614aa2c0885a2241c39e0363659ff23f5f4d19da95ea37e051e"
+      },
+      {
+        "case": "goods_9x8",
+        "path": "outputs/elicitation_packs/scalability/seed_1/goods_9x8/frozen_elicitation.json",
+        "seed": 1,
+        "sha256": "cc9d0a51e24309c59fc6344d697d073c5f4bbd17764453673ecf6bfd7e2d3174"
+      },
+      {
+        "case": "goods_10x8",
+        "path": "outputs/elicitation_packs/scalability/seed_1/goods_10x8/frozen_elicitation.json",
+        "seed": 1,
+        "sha256": "7a5b23e7efef37e93806b129ac1858d0d328fb23cf07cf2898407cc1431efc39"
+      },
+      {
+        "case": "bidders_8x4",
+        "path": "outputs/elicitation_packs/scalability/seed_1/bidders_8x4/frozen_elicitation.json",
+        "seed": 1,
+        "sha256": "395d1dbc110bd9a801fe1e42be99b353127e159ab8fdc4460cd83b065f962f15"
+      },
+      {
+        "case": "bidders_8x5",
+        "path": "outputs/elicitation_packs/scalability/seed_1/bidders_8x5/frozen_elicitation.json",
+        "seed": 1,
+        "sha256": "2386c2b78771457e612b7d1ef8e063e2d678769ac81aed7f043ba37289aa401b"
+      },
+      {
+        "case": "bidders_8x6",
+        "path": "outputs/elicitation_packs/scalability/seed_1/bidders_8x6/frozen_elicitation.json",
+        "seed": 1,
+        "sha256": "b0baccb321944bd048fa99a2e31dd97c7c352d5234080e0ce2df31720023768c"
+      },
+      {
+        "case": "bidders_8x7",
+        "path": "outputs/elicitation_packs/scalability/seed_1/bidders_8x7/frozen_elicitation.json",
+        "seed": 1,
+        "sha256": "14fbca68ccef9f248781478757adbbf2bcfba84e595f29aac68d6bcb18274d6f"
+      },
+      {
+        "case": "bidders_8x9",
+        "path": "outputs/elicitation_packs/scalability/seed_1/bidders_8x9/frozen_elicitation.json",
+        "seed": 1,
+        "sha256": "dac8ae8d13345912b75579ea563741d12d8162f7b494a6df88edd2a9b6fdd757"
+      },
+      {
+        "case": "bidders_8x10",
+        "path": "outputs/elicitation_packs/scalability/seed_1/bidders_8x10/frozen_elicitation.json",
+        "seed": 1,
+        "sha256": "f2988f4eaafa12c2f4b6b795f38968e3a1b6cb5226fcc9abe45a5bedbafee152"
+      },
+      {
+        "case": "joint_4x4",
+        "path": "outputs/elicitation_packs/scalability/seed_1/joint_4x4/frozen_elicitation.json",
+        "seed": 1,
+        "sha256": "dcfe153bb025d06acb19415c007293b685ff9f62f06dcff69554be5e53840948"
+      },
+      {
+        "case": "joint_5x5",
+        "path": "outputs/elicitation_packs/scalability/seed_1/joint_5x5/frozen_elicitation.json",
+        "seed": 1,
+        "sha256": "0143e9cba1253f07a2e31afbe1afbaba2ba5c317a2584104299c53ff79d56f62"
+      },
+      {
+        "case": "joint_6x6",
+        "path": "outputs/elicitation_packs/scalability/seed_1/joint_6x6/frozen_elicitation.json",
+        "seed": 1,
+        "sha256": "1f6a7cb241668913a8e80c99d49843674d17f6672d6ea7e3739549b0ae4b883d"
+      },
+      {
+        "case": "joint_7x7",
+        "path": "outputs/elicitation_packs/scalability/seed_1/joint_7x7/frozen_elicitation.json",
+        "seed": 1,
+        "sha256": "23d0a4a3af897398de9346fe7d0534db37f82870f735402414011bc99635fb18"
+      },
+      {
+        "case": "anchor_8x8",
+        "path": "outputs/elicitation_packs/scalability/seed_1/anchor_8x8/frozen_elicitation.json",
+        "seed": 1,
+        "sha256": "74a87ed5cda218a8383fb037999d9de2551bdb60fed0e3795b84a7617208db8f"
+      },
+      {
+        "case": "joint_9x9",
+        "path": "outputs/elicitation_packs/scalability/seed_1/joint_9x9/frozen_elicitation.json",
+        "seed": 1,
+        "sha256": "6d71c84ae3df88bd832f1e843712821a158cb383a78909766716b8511b8eceed"
+      },
+      {
+        "case": "joint_10x10",
+        "path": "outputs/elicitation_packs/scalability/seed_1/joint_10x10/frozen_elicitation.json",
+        "seed": 1,
+        "sha256": "1a82f22dd916224d915dd98adf6e8b69826ae371fe8fb022b253287c7e8560ce"
+      },
+      {
+        "case": "goods_4x8",
+        "path": "outputs/elicitation_packs/scalability/seed_2/goods_4x8/frozen_elicitation.json",
+        "seed": 2,
+        "sha256": "104bdb57a860269f608eed4de994dada128a1eebd0d8f3e7ae15cdd1cfa577b7"
+      },
+      {
+        "case": "goods_5x8",
+        "path": "outputs/elicitation_packs/scalability/seed_2/goods_5x8/frozen_elicitation.json",
+        "seed": 2,
+        "sha256": "d56e46490976f5d69f8370ab22e8177f5a4b76545fe587a687d5bdf9e6afe623"
+      },
+      {
+        "case": "goods_6x8",
+        "path": "outputs/elicitation_packs/scalability/seed_2/goods_6x8/frozen_elicitation.json",
+        "seed": 2,
+        "sha256": "adf859cb2d9af98ac91e1f1abdac7531b82261609de47c15bdf37d7aacb5cb34"
+      },
+      {
+        "case": "goods_7x8",
+        "path": "outputs/elicitation_packs/scalability/seed_2/goods_7x8/frozen_elicitation.json",
+        "seed": 2,
+        "sha256": "43e3a669a3c99bc486ebf38cfab6b41698b43fc8863b23d24a88b7a20227662b"
+      },
+      {
+        "case": "goods_9x8",
+        "path": "outputs/elicitation_packs/scalability/seed_2/goods_9x8/frozen_elicitation.json",
+        "seed": 2,
+        "sha256": "86826dfca677b13741f7d2aa06676e00cb15ff44447553692cf55fbb9e1b8b11"
+      },
+      {
+        "case": "goods_10x8",
+        "path": "outputs/elicitation_packs/scalability/seed_2/goods_10x8/frozen_elicitation.json",
+        "seed": 2,
+        "sha256": "99e836dcd0329071b5643bcaaa44563d33c2bafa13049c0170c165a0f3653f27"
+      },
+      {
+        "case": "bidders_8x4",
+        "path": "outputs/elicitation_packs/scalability/seed_2/bidders_8x4/frozen_elicitation.json",
+        "seed": 2,
+        "sha256": "e62163e5e19f11feeafdbeab61d512bd5b51aa2d42fe730f5a1b8ea19638fa5b"
+      },
+      {
+        "case": "bidders_8x5",
+        "path": "outputs/elicitation_packs/scalability/seed_2/bidders_8x5/frozen_elicitation.json",
+        "seed": 2,
+        "sha256": "fc8475238b8fe36fc3cdc060f51c6b662c5dd977d8ac416fbef6d744d0cf8e01"
+      },
+      {
+        "case": "bidders_8x6",
+        "path": "outputs/elicitation_packs/scalability/seed_2/bidders_8x6/frozen_elicitation.json",
+        "seed": 2,
+        "sha256": "8741a88d66c631200ca358ca001d13896e5dab849123586a2ae80caabbaf73cb"
+      },
+      {
+        "case": "bidders_8x7",
+        "path": "outputs/elicitation_packs/scalability/seed_2/bidders_8x7/frozen_elicitation.json",
+        "seed": 2,
+        "sha256": "53d078b7de3c992d760750e3639af888aadfed6b7c4a8b8db147bdabf7c2fc9c"
+      },
+      {
+        "case": "bidders_8x9",
+        "path": "outputs/elicitation_packs/scalability/seed_2/bidders_8x9/frozen_elicitation.json",
+        "seed": 2,
+        "sha256": "f8ebabecdcb803b2dab4be231d7a07e4e1832c57a72596356e1a0678c4a4bd64"
+      },
+      {
+        "case": "bidders_8x10",
+        "path": "outputs/elicitation_packs/scalability/seed_2/bidders_8x10/frozen_elicitation.json",
+        "seed": 2,
+        "sha256": "8d78fb0e190354ac4e36849a39bbec4329b0bf2dae7b1e1fa56a3bceefa6b91b"
+      },
+      {
+        "case": "joint_4x4",
+        "path": "outputs/elicitation_packs/scalability/seed_2/joint_4x4/frozen_elicitation.json",
+        "seed": 2,
+        "sha256": "ca1b40c058086e2b9dfaf729a74b32217dd228ac152e92d788c0ae2c11e61d8a"
+      },
+      {
+        "case": "joint_5x5",
+        "path": "outputs/elicitation_packs/scalability/seed_2/joint_5x5/frozen_elicitation.json",
+        "seed": 2,
+        "sha256": "783821bf9d2a920289c9dd9ef3a1760671d0a06e7418a858271a15ef6167c27a"
+      },
+      {
+        "case": "joint_6x6",
+        "path": "outputs/elicitation_packs/scalability/seed_2/joint_6x6/frozen_elicitation.json",
+        "seed": 2,
+        "sha256": "992f0445168efd102cc1949275ef9e417d8147afc7b355ce07c8fd1d5b7a298d"
+      },
+      {
+        "case": "joint_7x7",
+        "path": "outputs/elicitation_packs/scalability/seed_2/joint_7x7/frozen_elicitation.json",
+        "seed": 2,
+        "sha256": "9593eaf1802f834d9243532688c5d60ba5765798f4be44123650e944f5a3b7d8"
+      },
+      {
+        "case": "anchor_8x8",
+        "path": "outputs/elicitation_packs/scalability/seed_2/anchor_8x8/frozen_elicitation.json",
+        "seed": 2,
+        "sha256": "947ab697329dc4027a33cdf0e29a02c5827e7b86f908da28c37f950a3ab142d9"
+      },
+      {
+        "case": "joint_9x9",
+        "path": "outputs/elicitation_packs/scalability/seed_2/joint_9x9/frozen_elicitation.json",
+        "seed": 2,
+        "sha256": "c03fa41f034726b30838986f3fa4acb6c90d2584dcb9a00a1b66eb933e9b20cc"
+      },
+      {
+        "case": "joint_10x10",
+        "path": "outputs/elicitation_packs/scalability/seed_2/joint_10x10/frozen_elicitation.json",
+        "seed": 2,
+        "sha256": "d28a9dc8ea6913bffb8956ab17f5d52a8c3da1ab4693f3deee5a721907cb37e6"
+      },
+      {
+        "case": "goods_4x8",
+        "path": "outputs/elicitation_packs/scalability/seed_3/goods_4x8/frozen_elicitation.json",
+        "seed": 3,
+        "sha256": "7874f1e4af9a72e38b1eba247c2c3afb15996f6fd5850979b74a08d26dcbfbab"
+      },
+      {
+        "case": "goods_5x8",
+        "path": "outputs/elicitation_packs/scalability/seed_3/goods_5x8/frozen_elicitation.json",
+        "seed": 3,
+        "sha256": "8cda4c1a05cd84a9998c06c080dbbee10c62a300f7267b720eb2da551ccc665e"
+      },
+      {
+        "case": "goods_6x8",
+        "path": "outputs/elicitation_packs/scalability/seed_3/goods_6x8/frozen_elicitation.json",
+        "seed": 3,
+        "sha256": "0230be7e5a326c287b16a6cf4a2b95b4ab67a238466e8045ba58030972999a54"
+      },
+      {
+        "case": "goods_7x8",
+        "path": "outputs/elicitation_packs/scalability/seed_3/goods_7x8/frozen_elicitation.json",
+        "seed": 3,
+        "sha256": "a5c22e91fb48fc507a5866120a91504886912e1dd860474e9136c2619c7fd00f"
+      },
+      {
+        "case": "goods_9x8",
+        "path": "outputs/elicitation_packs/scalability/seed_3/goods_9x8/frozen_elicitation.json",
+        "seed": 3,
+        "sha256": "dde74124f8f043b26fa3d32581ad617839b4534e310773706bbde5181b0fc246"
+      },
+      {
+        "case": "goods_10x8",
+        "path": "outputs/elicitation_packs/scalability/seed_3/goods_10x8/frozen_elicitation.json",
+        "seed": 3,
+        "sha256": "68533106be92e2e9b0fa3c9e149885843e61fd5386331c9bbea71db718633e43"
+      },
+      {
+        "case": "bidders_8x4",
+        "path": "outputs/elicitation_packs/scalability/seed_3/bidders_8x4/frozen_elicitation.json",
+        "seed": 3,
+        "sha256": "843c7502c9d4681863d3750ca9921fae61be1dff9d3f2e65b8c2f1a486f23c0b"
+      },
+      {
+        "case": "bidders_8x5",
+        "path": "outputs/elicitation_packs/scalability/seed_3/bidders_8x5/frozen_elicitation.json",
+        "seed": 3,
+        "sha256": "6de42b4d01b6252553f2232bc087cc22de0778e2b64d5bda6a7da17b33581f10"
+      },
+      {
+        "case": "bidders_8x6",
+        "path": "outputs/elicitation_packs/scalability/seed_3/bidders_8x6/frozen_elicitation.json",
+        "seed": 3,
+        "sha256": "1db4d0bdb341129f310a3c2fc15a6f26e4444201ddf3278744a20bd3fdf4951b"
+      },
+      {
+        "case": "bidders_8x7",
+        "path": "outputs/elicitation_packs/scalability/seed_3/bidders_8x7/frozen_elicitation.json",
+        "seed": 3,
+        "sha256": "2c6bb090fd13e28d629a4d40d7761ea18e370d3b7acb796b7bf7324b5f4bc681"
+      },
+      {
+        "case": "bidders_8x9",
+        "path": "outputs/elicitation_packs/scalability/seed_3/bidders_8x9/frozen_elicitation.json",
+        "seed": 3,
+        "sha256": "3f644e0d795455b54d1ca9363d3ff3c2bd33cb918a8cb2f4450729c9bb6356d0"
+      },
+      {
+        "case": "bidders_8x10",
+        "path": "outputs/elicitation_packs/scalability/seed_3/bidders_8x10/frozen_elicitation.json",
+        "seed": 3,
+        "sha256": "559e816be3ca14aad2baf306f95804c805635cc7878ba7cc1d3f2efbec3ff191"
+      },
+      {
+        "case": "joint_4x4",
+        "path": "outputs/elicitation_packs/scalability/seed_3/joint_4x4/frozen_elicitation.json",
+        "seed": 3,
+        "sha256": "a9931f93e082113c0673abd287bac076badb21d0bf4a3bb95c819c9ceed6cda0"
+      },
+      {
+        "case": "joint_5x5",
+        "path": "outputs/elicitation_packs/scalability/seed_3/joint_5x5/frozen_elicitation.json",
+        "seed": 3,
+        "sha256": "4784d9bd97f39a970214be29d02f3fe56aa7ab85ea587befde1d5f7948d87621"
+      },
+      {
+        "case": "joint_6x6",
+        "path": "outputs/elicitation_packs/scalability/seed_3/joint_6x6/frozen_elicitation.json",
+        "seed": 3,
+        "sha256": "293717dd005a13304b1b3b8907b0508ed922b3f9b41089530776bfb2e92a15b4"
+      },
+      {
+        "case": "joint_7x7",
+        "path": "outputs/elicitation_packs/scalability/seed_3/joint_7x7/frozen_elicitation.json",
+        "seed": 3,
+        "sha256": "7944f6b5bb245d10195eab465a61957e00e5c1d02b1e61479e14b7be986e5152"
+      },
+      {
+        "case": "anchor_8x8",
+        "path": "outputs/elicitation_packs/scalability/seed_3/anchor_8x8/frozen_elicitation.json",
+        "seed": 3,
+        "sha256": "72fc712c1e04ae8b89279a540fa8dd207aa2e6a949113b738666db2cdbe37a0c"
+      },
+      {
+        "case": "joint_9x9",
+        "path": "outputs/elicitation_packs/scalability/seed_3/joint_9x9/frozen_elicitation.json",
+        "seed": 3,
+        "sha256": "107bb26e10043c57b91b1ecb43866fd9ef7fe0ca346dfa9dd2c8c035a48f110d"
+      },
+      {
+        "case": "joint_10x10",
+        "path": "outputs/elicitation_packs/scalability/seed_3/joint_10x10/frozen_elicitation.json",
+        "seed": 3,
+        "sha256": "736e0bac064f42552cdc45801dfd9d9750191eb0eb56f878da1440c55f013641"
+      },
+      {
+        "case": "goods_4x8",
+        "path": "outputs/elicitation_packs/scalability/seed_4/goods_4x8/frozen_elicitation.json",
+        "seed": 4,
+        "sha256": "f3f6ce353676dfc94bd2cc94f14e3cd28c8dc60bc2d3156e717294dbddc38ce8"
+      },
+      {
+        "case": "goods_5x8",
+        "path": "outputs/elicitation_packs/scalability/seed_4/goods_5x8/frozen_elicitation.json",
+        "seed": 4,
+        "sha256": "81efc66517667fa9a204b1fe2b5c06052ff30f1de18b3c16e29c762a45f2e4a0"
+      },
+      {
+        "case": "goods_6x8",
+        "path": "outputs/elicitation_packs/scalability/seed_4/goods_6x8/frozen_elicitation.json",
+        "seed": 4,
+        "sha256": "eab5ea4d97d015151c0a37a0fab00c8431b543afb8e3158a9eff4c727eed5038"
+      },
+      {
+        "case": "goods_7x8",
+        "path": "outputs/elicitation_packs/scalability/seed_4/goods_7x8/frozen_elicitation.json",
+        "seed": 4,
+        "sha256": "323e925fb86bb6dd0521e7ec5d8e48aaf65d45bf5f9e326d1f3ca9e5ffadcae1"
+      },
+      {
+        "case": "goods_9x8",
+        "path": "outputs/elicitation_packs/scalability/seed_4/goods_9x8/frozen_elicitation.json",
+        "seed": 4,
+        "sha256": "d4900685d9bb09b8545ee36dbfd23e20a19f508a67766d77194ad5e1df2386ab"
+      },
+      {
+        "case": "goods_10x8",
+        "path": "outputs/elicitation_packs/scalability/seed_4/goods_10x8/frozen_elicitation.json",
+        "seed": 4,
+        "sha256": "5172aaadb3130ec0e43ad153de7a39422bee298edc426ff9b0151afb473f2d1d"
+      },
+      {
+        "case": "bidders_8x4",
+        "path": "outputs/elicitation_packs/scalability/seed_4/bidders_8x4/frozen_elicitation.json",
+        "seed": 4,
+        "sha256": "7f4e8cbe8686f365ee9b15b44be26acd0e62f28659b194e4e8584704841e9604"
+      },
+      {
+        "case": "bidders_8x5",
+        "path": "outputs/elicitation_packs/scalability/seed_4/bidders_8x5/frozen_elicitation.json",
+        "seed": 4,
+        "sha256": "b6d73bf8bde7e52f265f344f7358637a577b8134951e5be3e8a6c2e6ee038c47"
+      },
+      {
+        "case": "bidders_8x6",
+        "path": "outputs/elicitation_packs/scalability/seed_4/bidders_8x6/frozen_elicitation.json",
+        "seed": 4,
+        "sha256": "4c74fd173ac940bf052d6e579b011f8297f7a375e3ec4bd4ced39bfddcaa19fd"
+      },
+      {
+        "case": "bidders_8x7",
+        "path": "outputs/elicitation_packs/scalability/seed_4/bidders_8x7/frozen_elicitation.json",
+        "seed": 4,
+        "sha256": "3915f2bcc919cae93d05c6c57955f0542fa11c6bda628dbd40e306d3266b4485"
+      },
+      {
+        "case": "bidders_8x9",
+        "path": "outputs/elicitation_packs/scalability/seed_4/bidders_8x9/frozen_elicitation.json",
+        "seed": 4,
+        "sha256": "2d45a056152b05cf723f95f5a4a2b8fe50fc164e9e37484ba55ebe948be6bbca"
+      },
+      {
+        "case": "bidders_8x10",
+        "path": "outputs/elicitation_packs/scalability/seed_4/bidders_8x10/frozen_elicitation.json",
+        "seed": 4,
+        "sha256": "73f7367dac0b59159c7c1c798438a98fddf11148c280de6047e4c91863f96b01"
+      },
+      {
+        "case": "joint_4x4",
+        "path": "outputs/elicitation_packs/scalability/seed_4/joint_4x4/frozen_elicitation.json",
+        "seed": 4,
+        "sha256": "043077d6146285af00e2a5db9004c267daf753326c64cc0847264dad533e7d0d"
+      },
+      {
+        "case": "joint_5x5",
+        "path": "outputs/elicitation_packs/scalability/seed_4/joint_5x5/frozen_elicitation.json",
+        "seed": 4,
+        "sha256": "09e5cec1b6a715cc6b8470930f00b528ccf0bc9566c56a874f04cdc1d3e7c2b1"
+      },
+      {
+        "case": "joint_6x6",
+        "path": "outputs/elicitation_packs/scalability/seed_4/joint_6x6/frozen_elicitation.json",
+        "seed": 4,
+        "sha256": "a80fd7a44791119fd24ec2b84cb01270101a66c927f07335730cd90d4f12ed7a"
+      },
+      {
+        "case": "joint_7x7",
+        "path": "outputs/elicitation_packs/scalability/seed_4/joint_7x7/frozen_elicitation.json",
+        "seed": 4,
+        "sha256": "03742e3fabc43a539b26ee0054973ef0ab9fdb7847eee4abc07dce05c6f987d1"
+      },
+      {
+        "case": "anchor_8x8",
+        "path": "outputs/elicitation_packs/scalability/seed_4/anchor_8x8/frozen_elicitation.json",
+        "seed": 4,
+        "sha256": "35ecdb313e5a7bcd83f0b20cf5df23dea855ba1fd7ba46615b38188ebe92c765"
+      },
+      {
+        "case": "joint_9x9",
+        "path": "outputs/elicitation_packs/scalability/seed_4/joint_9x9/frozen_elicitation.json",
+        "seed": 4,
+        "sha256": "aa038042cc645d05fa7da6f0ef53f4a66564ed1bff4bfb76880a7467d1eb8f8b"
+      },
+      {
+        "case": "joint_10x10",
+        "path": "outputs/elicitation_packs/scalability/seed_4/joint_10x10/frozen_elicitation.json",
+        "seed": 4,
+        "sha256": "95db93f2046f0cd00639af5bf961a841bcb13c516f8415106ae9859965a65a93"
+      }
+    ],
+    "seeds": [
+      0,
+      1,
+      2,
+      3,
+      4
+    ],
+    "sizes": [
+      4,
+      5,
+      6,
+      7,
+      8,
+      9,
+      10
+    ]
+  },
+  "event_policy": {
+    "clock": {
+      "additional_pivotal_challengers": false,
+      "allocation_change_audit": false,
+      "allocation_counterfactual_frontier": false,
+      "contested_bundle_refinement": false,
+      "demand_switch_verification": false,
+      "framework": "frontier_v1",
+      "frontier_pivotal_challengers": false,
+      "frontier_staged_revealed_vcg_closure": true,
+      "frontier_vcg_revealed_only": true,
+      "frontier_vcg_single_pass": true,
+      "frontier_vcg_witness_verification": false,
+      "frontier_winner_closure": true,
+      "frontier_winner_verification": false,
+      "gate_near_zero_surplus": false,
+      "incumbent_verification": false,
+      "large_correction_followup": false,
+      "native_demand_changed": false,
+      "native_near_tie": false,
+      "native_near_zero_surplus": false,
+      "scarcity_fallbacks": false,
+      "supplementary_support_policy": "all_atoms",
+      "terminal_best_losing_challenger": false,
+      "terminal_regret_audit": false,
+      "terminal_stability_audit": false,
+      "terminal_vcg_witness_verification": false,
+      "terminal_winner_verification": false,
+      "top_k_frontier_policy": "off"
+    },
+    "correction_threshold": 0.25,
+    "name": "final-v3",
+    "sealed": {
+      "feedback_rule": "competitive",
+      "incumbent_verification": true,
+      "large_correction_followup": true,
+      "loser_challenger_policy": "off",
+      "pivotal_challengers": false,
+      "scarcity_fallbacks": true,
+      "terminal_regret_audit": false
+    }
+  },
+  "example_selection": [
+    "largest_sealed_efficiency_improvement",
+    "largest_sealed_revenue_loss_reduction",
+    "median_query_case_reaching_full_efficiency_from_below",
+    "representative_non_improving_case"
+  ],
+  "format": "auctionlab.final_experiment",
+  "model_robustness": {
+    "calibration": "raw_per_model",
+    "models": [],
+    "scope": "five_seed_8x8_fixed_disclosures"
+  },
+  "primary_metrics": [
+    "efficiency",
+    "efficiency_gain_from_initial",
+    "revenue_loss",
+    "payment_error_over_optimum_welfare",
+    "value_queries",
+    "rounds",
+    "runtime"
+  ],
+  "queries": {
+    "global_safety_cap": 0,
+    "per_bidder_safety_cap": 0,
+    "person_query_mode": "deterministic"
+  },
+  "scenario": {
+    "path": "scenarios/pc_build_v3/pc_build_population_16x16.json",
+    "selection_policy": "coverage_stratified",
+    "sha256": "520c0b8f0d3f864117c70a90cb7824a08ff5d287ab4a0db9459e8bc8b2de5b8a"
+  },
+  "sealed": {
+    "max_rounds": 40,
+    "stopping_rule": "no_new_refinements"
+  },
+  "status": "frozen",
+  "version": 3
+}

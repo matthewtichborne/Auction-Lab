@@ -20,6 +20,9 @@ def make_proxy(
     responses: list[str],
     *,
     epsilon: float = 0.75,
+    size_discount_family: str | None = None,
+    size_discount_k0: int = 3,
+    size_discount_gamma: float = 1.0,
 ) -> LlmInferredXorProxy:
     person = LlmPersonSimulator(
         bidder_id="bidder_1",
@@ -32,6 +35,9 @@ def make_proxy(
         bidder_id="bidder_1",
         person=person,
         epsilon=epsilon,
+        size_discount_family=size_discount_family,
+        size_discount_k0=size_discount_k0,
+        size_discount_gamma=size_discount_gamma,
     )
 
 
@@ -59,6 +65,39 @@ def test_infer_xor_bid_discounts_values_and_records_transcript():
     ]
     assert len(proxy.transcript) == 2
     assert proxy.transcript[0].kind == "value_query"
+
+
+def test_deterministic_refinement_replaces_scaled_pv_with_unscaled_truth():
+    bundle = frozenset({"A", "B", "C", "D"})
+    person = LlmPersonSimulator(
+        bidder_id="bidder_1",
+        scenario_description="A test auction.",
+        person_seed="Values the complete set.",
+        item_descriptions={item: item for item in bundle},
+        client=MockLlmClient([]),
+        ground_truth_valuations={bundle: 1000.0},
+    )
+    proxy = LlmInferredXorProxy(
+        bidder_id="bidder_1",
+        person=person,
+        epsilon=1.0,
+        size_discount_family="exponential",
+        size_discount_k0=3,
+        size_discount_gamma=0.9,
+    )
+    proxy.replay_elicitation(
+        nl_question="What do you want?",
+        nl_answer="The complete set.",
+        provisional_raw_values={bundle: 1000.0},
+        discount_inferred=True,
+    )
+
+    assert proxy._cached_bid is not None
+    assert proxy._cached_bid.value_of(bundle) == pytest.approx(900.0)
+    refined = proxy.refine_bundle_value(bundle, "provisional allocation")
+
+    assert refined == pytest.approx(1000.0)
+    assert proxy._cached_bid.value_of(bundle) == pytest.approx(1000.0)
 
 
 def test_set_provisional_bid_raises_superset_below_subset():
@@ -147,6 +186,84 @@ def test_infer_xor_bid_skips_empty_bundle():
 def test_proxy_rejects_invalid_epsilon(epsilon):
     with pytest.raises(ValueError, match="epsilon"):
         make_proxy([], epsilon=epsilon)
+
+
+# ---------------------------------------------------------------------------
+# Exponential size discount (adjusted = raw * epsilon * gamma**max(0, |B|-k0))
+# ---------------------------------------------------------------------------
+
+class TestExponentialSizeDiscount:
+    def test_infer_xor_bid_applies_discount_above_k0(self):
+        proxy = make_proxy(
+            ['{"bundle_value": 100}', '{"bundle_value": 100}'],
+            epsilon=1.0,
+            size_discount_family="exponential",
+            size_discount_k0=1,
+            size_discount_gamma=0.9,
+        )
+
+        # {A} (size 1) is not a subset of {B, C} (size 2), so free-disposal
+        # monotonicity repair cannot interfere with either value.
+        bid = proxy.infer_xor_bid([frozenset({"A"}), frozenset({"B", "C"})])
+
+        values = {atom.bundle: atom.value for atom in bid.atoms}
+        assert values[frozenset({"A"})] == 100.0
+        assert values[frozenset({"B", "C"})] == pytest.approx(100.0 * 0.9)
+
+    def test_size_discount_noop_when_family_none(self):
+        proxy = make_proxy(['{"bundle_value": 100}'], epsilon=1.0, size_discount_family=None)
+        bid = proxy.infer_xor_bid([frozenset({"B", "C"})])
+        assert bid.atoms == [XorAtomicBid(bundle=frozenset({"B", "C"}), value=100.0)]
+
+    def test_replay_elicitation_composes_epsilon_then_size_discount(self):
+        proxy = make_proxy(
+            [],
+            epsilon=0.5,
+            size_discount_family="exponential",
+            size_discount_k0=1,
+            size_discount_gamma=0.9,
+        )
+        proxy.replay_elicitation(
+            nl_question="Q",
+            nl_answer="A",
+            provisional_raw_values={
+                frozenset({"A"}): 100.0,
+                frozenset({"B", "C"}): 100.0,
+            },
+            discount_inferred=True,
+        )
+
+        values = {atom.bundle: atom.value for atom in proxy._cached_bid.atoms}
+        # size 1 <= k0=1: epsilon only.
+        assert values[frozenset({"A"})] == 50.0
+        # size 2 > k0=1: epsilon * gamma**(2-1).
+        assert values[frozenset({"B", "C"})] == pytest.approx(100.0 * 0.5 * 0.9)
+
+    def test_replay_elicitation_ignores_size_discount_when_discount_inferred_false(self):
+        proxy = make_proxy(
+            [],
+            epsilon=0.5,
+            size_discount_family="exponential",
+            size_discount_k0=0,
+            size_discount_gamma=0.1,
+        )
+        proxy.replay_elicitation(
+            nl_question="Q",
+            nl_answer="A",
+            provisional_raw_values={frozenset({"A", "B", "C"}): 100.0},
+            discount_inferred=False,
+        )
+        values = {atom.bundle: atom.value for atom in proxy._cached_bid.atoms}
+        assert values[frozenset({"A", "B", "C"})] == 100.0
+
+    @pytest.mark.parametrize("gamma", [0.0, -0.1])
+    def test_proxy_rejects_invalid_size_discount_gamma(self, gamma):
+        with pytest.raises(ValueError, match="size_discount_gamma"):
+            make_proxy([], size_discount_family="exponential", size_discount_gamma=gamma)
+
+    def test_proxy_rejects_unknown_size_discount_family(self):
+        with pytest.raises(ValueError, match="size_discount_family"):
+            make_proxy([], size_discount_family="linear")
 
 
 def test_infer_values_returns_bundle_value_mapping():

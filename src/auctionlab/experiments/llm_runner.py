@@ -123,6 +123,7 @@ def run_sealed_llm_proxy_experiment(
                 for bidder_id in instance.bidder_ids
             },
             "reported_bids": reported_bids,
+            "vcg_counterfactuals": outcome.vcg_counterfactuals,
         },
     )
 
@@ -273,6 +274,7 @@ def run_clock_llm_proxy_experiment(
             "top_k": top_k,
             "discount_inferred": discount_inferred,
             "use_anchor_values": use_anchor_values,
+            "vcg_counterfactuals": outcome.vcg_counterfactuals,
             "elicited": elicited,
             "margin_threshold": margin_threshold,
             "tie_threshold": tie_threshold,

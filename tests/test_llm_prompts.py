@@ -3,11 +3,15 @@ from __future__ import annotations
 import pytest
 
 from auctionlab.llm.prompts import (
+    build_interest_map_prompt,
     build_initial_proxy_question_prompt,
     build_person_answer_prompt,
+    build_person_answer_verification_prompt,
     build_provisional_valuation_prompt,
     build_value_query_prompt,
+    canonical_opening_question,
     describe_bundle,
+    person_answer_word_limits,
 )
 
 
@@ -15,6 +19,40 @@ ITEM_DESCRIPTIONS = {
     "IPAD": "Apple iPad",
     "PENCIL": "Apple Pencil",
 }
+
+
+def test_person_answer_word_limits_scale_but_stay_compact():
+    assert person_answer_word_limits(10) == (70, 100)
+    assert person_answer_word_limits(16) == (91, 130)
+
+
+def test_canonical_opening_question_is_domain_specific_and_non_numeric():
+    question = canonical_opening_question(domain="pc_build")
+
+    assert "PC-component auction" in question
+    assert "alternatives" in question
+    assert "multiples" in question
+    assert "most you would spend overall" in question
+    assert "$" not in question
+
+
+def test_interest_map_prompt_disciplines_exclusions_and_substitutes():
+    prompt = build_interest_map_prompt(
+        scenario_description="A generic equipment auction.",
+        item_descriptions={"A": "Item A", "B": "Item B", "C": "Item C"},
+        nl_question="What do you need?",
+        nl_answer="B is my first choice, A is a backup, and I do not need C.",
+    )
+    assert "merely because it appears in the auction" in prompt
+    assert "mentioned it negatively" in prompt
+    assert "backup if B is unavailable" in prompt
+    assert "substitute_groups" in prompt
+    assert "do not need C" in prompt
+    assert "excluded_items" in prompt
+    assert "do not impose hidden domain rules" in prompt
+    assert "if the price is right" in prompt
+    assert "is NOT evidence of" in prompt
+    assert "explicit synergy is absent" in prompt
 
 
 def test_describe_bundle_sorts_items_and_includes_descriptions():
@@ -57,7 +95,6 @@ def test_value_query_prompt_contains_context_steps_and_schema():
     for step in range(1, 6):
         assert f"{step}." in prompt
     assert '"bundle_value"' in prompt
-    assert '"queried_bundle"' in prompt
     assert '"confidence"' in prompt
     assert '"reasoning_summary"' in prompt
     assert "ONLY the PROPOSED_BUNDLE" in prompt
@@ -152,6 +189,7 @@ def test_placeholder_prompt_builders_include_supplied_context():
         scenario_description="Scenario context",
         person_seed="Preference context",
         question="What matters most?",
+        item_descriptions=ITEM_DESCRIPTIONS,
     )
     proxy_prompt = build_initial_proxy_question_prompt(
         scenario_description="Scenario context",
@@ -161,12 +199,34 @@ def test_placeholder_prompt_builders_include_supplied_context():
     assert "Scenario context" in answer_prompt
     assert "Preference context" in answer_prompt
     assert "What matters most?" in answer_prompt
+    assert "Available catalogue" in answer_prompt
+    assert "IPAD: Apple iPad" in answer_prompt
     assert "Scenario context" in proxy_prompt
     # The proxy's opening question must not have access to the person's
     # preference seed -- it's meeting this person for the first time.
     assert "Preference context" not in proxy_prompt
     assert "IPAD" in proxy_prompt
     assert "Apple iPad" in proxy_prompt
+    assert "only the one maximum-total-willingness-to-pay figure" in answer_prompt
+    assert "Do not invent or report individual item values" in answer_prompt
+    assert "Do not invent substitute or complementary" in answer_prompt
+    assert "Do not suggest that they want all items" in proxy_prompt
+    assert "maximum total willingness to pay" in proxy_prompt
+    assert "not individual item" in proxy_prompt
+
+
+def test_person_answer_verifier_prompt_is_blind_to_hidden_truth():
+    prompt = build_person_answer_verification_prompt(
+        scenario_description="Scenario context",
+        question="What do you want?",
+        answer="I would like the iPad.",
+        item_descriptions=ITEM_DESCRIPTIONS,
+    )
+
+    assert "Person preference seed" not in prompt
+    assert "Expected positive" not in prompt
+    assert "Expected substitute" not in prompt
+    assert "The answer is the sole source" in prompt
 
 
 def test_initial_proxy_question_prompt_rejects_person_seed():
@@ -208,6 +268,12 @@ def test_provisional_valuation_prompt_reflects_only_the_nl_exchange():
     assert "What do you want?" in prompt
     assert "I want the iPad." in prompt
     assert "IPAD" in prompt
+    assert "there is no default percentage" in prompt
+    assert "never as a target" in prompt
+    assert '"values": [' in prompt
+    assert "Do not repeat bundle" in prompt
+    assert "IDs in the response" in prompt
+    assert '"valuations"' not in prompt
 
 
 def test_build_value_query_prompt_includes_elicitation_context():
@@ -222,6 +288,92 @@ def test_build_value_query_prompt_includes_elicitation_context():
     assert "ELICITATION_CONTEXT:" in prompt
     assert "close to being dropped" in prompt
     assert "Focus your reassessment" in prompt
+
+
+def test_value_query_prompt_says_not_to_output_queried_bundle():
+    prompt = build_value_query_prompt(
+        scenario_description="A technology auction.",
+        person_seed="Prefers portable creative tools.",
+        item_descriptions=ITEM_DESCRIPTIONS,
+        bundle=frozenset({"IPAD", "PENCIL"}),
+    )
+
+    assert "Do NOT output a queried_bundle field" in prompt
+    assert "do not include a queried_bundle" in prompt
+
+
+def _response_schema_json_body(prompt: str) -> str:
+    """Extract just the ``{ ... }`` JSON template following the schema header."""
+    header_index = prompt.index("Return JSON only in exactly this schema")
+    after_header = prompt[header_index:]
+    return after_header.split("{", 1)[1].split("}", 1)[0]
+
+
+def test_value_query_prompt_response_template_has_value_fields():
+    prompt = build_value_query_prompt(
+        scenario_description="A technology auction.",
+        person_seed="Prefers portable creative tools.",
+        item_descriptions=ITEM_DESCRIPTIONS,
+        bundle=frozenset({"IPAD", "PENCIL"}),
+    )
+
+    json_body = _response_schema_json_body(prompt)
+    assert '"bundle_value"' in json_body
+    assert '"confidence"' in json_body
+    assert '"reasoning_summary"' in json_body
+
+
+def test_value_query_prompt_response_template_omits_queried_bundle():
+    prompt = build_value_query_prompt(
+        scenario_description="A technology auction.",
+        person_seed="Prefers portable creative tools.",
+        item_descriptions=ITEM_DESCRIPTIONS,
+        bundle=frozenset({"IPAD", "PENCIL"}),
+    )
+
+    json_body = _response_schema_json_body(prompt)
+    assert "queried_bundle" not in json_body
+
+
+def test_value_query_prompt_still_says_evaluate_exact_bundle():
+    prompt = build_value_query_prompt(
+        scenario_description="A technology auction.",
+        person_seed="Prefers portable creative tools.",
+        item_descriptions=ITEM_DESCRIPTIONS,
+        bundle=frozenset({"IPAD", "PENCIL"}),
+    )
+
+    assert "Evaluate ONLY the exact bundle named in PROPOSED_BUNDLE_ITEM_IDS" in prompt
+
+
+def test_value_query_prompt_says_assign_lower_value_not_alter_bundle():
+    prompt = build_value_query_prompt(
+        scenario_description="A technology auction.",
+        person_seed="Prefers portable creative tools.",
+        item_descriptions=ITEM_DESCRIPTIONS,
+        bundle=frozenset({"IPAD", "PENCIL"}),
+    )
+
+    assert "LOW\n  bundle_value -- never by trying to change the bundle." in prompt
+
+
+def test_value_query_prompt_includes_bad_good_example_without_queried_bundle():
+    prompt = build_value_query_prompt(
+        scenario_description="A technology auction.",
+        person_seed="Prefers portable creative tools.",
+        item_descriptions=ITEM_DESCRIPTIONS,
+        bundle=frozenset({"IPAD", "PENCIL"}),
+    )
+
+    assert "Bad example" in prompt
+    assert '"queried_bundle": ["GPU_AI", "GPU_GAM", "RAM_64"]' in prompt
+    assert "Good example" in prompt
+
+    good_example_section = prompt.split("Good example:", maxsplit=1)[1]
+    good_json_body = good_example_section.split("response: {", 1)[1].split(
+        "}", 1
+    )[0]
+    assert "queried_bundle" not in good_json_body
 
 
 def test_build_value_query_prompt_no_elicitation_context_by_default():

@@ -1,0 +1,414 @@
+{
+  "bidder_profiles": [
+    {
+      "bidder_id": "enthusiast_gamer",
+      "archetype_category": "gaming_performance",
+      "role": "Competitive gamer who purchases top-tier components to maximise framerate and longevity in high-refresh tournaments.",
+      "identity_text": "A long-time competitive gamer who regularly participates in online tournaments and organised team play.",
+      "budget_range": [
+        1500,
+        4000
+      ],
+      "base_values": {
+        "CPU_HI": 500,
+        "CPU_MID": 280,
+        "CPU_LO": 80,
+        "GPU_GAM_HI": 1300,
+        "GPU_VALUE": 200,
+        "RAM_64": 320,
+        "RAM_32": 150,
+        "MB_STD": 180,
+        "SSD_2TB": 220,
+        "PSU_1000": 190,
+        "COOL_AIO": 140,
+        "CASE_ATX": 120
+      },
+      "substitute_groups": [
+        {
+          "items": [
+            "CPU_HI",
+            "CPU_MID",
+            "CPU_LO"
+          ],
+          "backup_factor": 0,
+          "acquisition_mode": "choose_one",
+          "description": "Primary CPU choice: a high-performance CPU is preferred for max FPS, but mid/entry CPUs are acceptable trade-offs for budget builds."
+        },
+        {
+          "items": [
+            "GPU_GAM_HI",
+            "GPU_VALUE"
+          ],
+          "backup_factor": 0.2,
+          "acquisition_mode": "can_use_multiple",
+          "description": "Prefer a high-end gaming GPU; a value GPU can substitute or be used as a second GPU for multi-system setups."
+        },
+        {
+          "items": [
+            "RAM_64",
+            "RAM_32"
+          ],
+          "backup_factor": 0.1,
+          "acquisition_mode": "can_use_multiple",
+          "description": "Memory capacity choices for gaming rigs; larger kits preferred but smaller kits still offer value or can be combined across systems."
+        }
+      ],
+      "complement_groups": [
+        {
+          "items": [
+            "CPU_HI",
+            "MB_STD",
+            "RAM_64",
+            "COOL_AIO",
+            "PSU_1000"
+          ],
+          "bonus": 350,
+          "description": "High-performance gaming build bundle: CPU, motherboard, adequate RAM, cooling, and power supply for sustained high clocks."
+        },
+        {
+          "items": [
+            "GPU_GAM_HI",
+            "SSD_2TB",
+            "CASE_ATX"
+          ],
+          "bonus": 180,
+          "description": "GPU-focused upgrade pack to improve load times and system integration in a full-size chassis."
+        }
+      ],
+      "budget_cap": null,
+      "saturation_start": 2,
+      "saturation_penalty": 120,
+      "notes": "Prioritises framerate and thermal headroom; may accept lower-tier items if budget constrained.",
+      "core_items": [
+        "CPU_HI",
+        "GPU_GAM_HI",
+        "RAM_64",
+        "MB_STD",
+        "PSU_1000"
+      ],
+      "secondary_items": [
+        "SSD_2TB",
+        "COOL_AIO",
+        "CASE_ATX",
+        "CPU_MID"
+      ],
+      "low_interest_items": [
+        "GPU_VALUE",
+        "CPU_LO",
+        "RAM_32",
+        "SSD_4TB",
+        "MB_PRO",
+        "GPU_AI",
+        "RAM_128"
+      ]
+    },
+    {
+      "bidder_id": "value_gamer",
+      "archetype_category": "gaming_performance",
+      "role": "Price-conscious gamer seeking the best performance per dollar while avoiding unnecessary premium extras.",
+      "identity_text": "A recreational gamer who spends evenings playing mainstream multiplayer and single-player games with friends.",
+      "budget_range": [
+        600,
+        1400
+      ],
+      "base_values": {
+        "CPU_MID": 320,
+        "CPU_LO": 90,
+        "GPU_VALUE": 360,
+        "GPU_GAM_HI": 800,
+        "RAM_32": 150,
+        "RAM_64": 280,
+        "MB_STD": 170,
+        "SSD_2TB": 210,
+        "SSD_4TB": 380,
+        "PSU_1000": 160,
+        "COOL_AIO": 100,
+        "CASE_ATX": 100
+      },
+      "substitute_groups": [
+        {
+          "items": [
+            "CPU_MID",
+            "CPU_LO"
+          ],
+          "backup_factor": 0,
+          "acquisition_mode": "choose_one",
+          "description": "Balanced vs entry CPUs: mid-range preferred, entry is an acceptable budget substitute with lower marginal benefits for this user."
+        },
+        {
+          "items": [
+            "GPU_VALUE",
+            "GPU_GAM_HI"
+          ],
+          "backup_factor": 0.15,
+          "acquisition_mode": "can_use_multiple",
+          "description": "Primary graphics choice: value card is the main target; a higher-end card can be an occasional upgrade or second-system use."
+        },
+        {
+          "items": [
+            "RAM_32",
+            "RAM_64"
+          ],
+          "backup_factor": 0.05,
+          "acquisition_mode": "can_use_multiple",
+          "description": "Memory kits: 32GB is cost-effective; 64GB considered for longevity or combined use."
+        }
+      ],
+      "complement_groups": [
+        {
+          "items": [
+            "CPU_MID",
+            "MB_STD",
+            "RAM_32",
+            "SSD_2TB"
+          ],
+          "bonus": 120,
+          "description": "Affordable modern gaming build combo focused on balanced components and solid storage."
+        },
+        {
+          "items": [
+            "GPU_VALUE",
+            "PSU_1000",
+            "CASE_ATX"
+          ],
+          "bonus": 80,
+          "description": "GPU upgrade kit including a reliable power supply and case for installation."
+        }
+      ],
+      "budget_cap": null,
+      "saturation_start": 1,
+      "saturation_penalty": 90,
+      "notes": "Chooses value options but may occasionally purchase higher-tier parts for long-term savings.",
+      "core_items": [
+        "GPU_VALUE",
+        "CPU_MID",
+        "RAM_32",
+        "MB_STD",
+        "SSD_2TB"
+      ],
+      "secondary_items": [
+        "CPU_LO",
+        "RAM_64",
+        "PSU_1000",
+        "CASE_ATX"
+      ],
+      "low_interest_items": [
+        "GPU_GAM_HI",
+        "GPU_AI",
+        "RAM_128",
+        "SSD_4TB",
+        "MB_PRO",
+        "COOL_AIO",
+        "CPU_HI"
+      ]
+    },
+    {
+      "bidder_id": "streamer_creator",
+      "archetype_category": "gaming_performance",
+      "role": "Live streamer and content creator who needs both high-quality gaming performance and resources for recording/encoding and editing.",
+      "identity_text": "A livestreamer and video creator who broadcasts gameplay and produces edited recordings for an online audience.",
+      "budget_range": [
+        2500,
+        7000
+      ],
+      "base_values": {
+        "CPU_HI": 480,
+        "CPU_MID": 300,
+        "GPU_AI": 3200,
+        "GPU_GAM_HI": 1200,
+        "RAM_128": 820,
+        "RAM_64": 350,
+        "MB_PRO": 420,
+        "SSD_4TB": 460,
+        "SSD_2TB": 210,
+        "PSU_1000": 200,
+        "COOL_AIO": 160,
+        "CASE_ATX": 130
+      },
+      "substitute_groups": [
+        {
+          "items": [
+            "CPU_HI",
+            "CPU_MID"
+          ],
+          "backup_factor": 0,
+          "acquisition_mode": "choose_one",
+          "description": "Prefer a high-core CPU for simultaneous streaming/encoding; mid-range can substitute but reduces multi-task headroom."
+        },
+        {
+          "items": [
+            "GPU_AI",
+            "GPU_GAM_HI"
+          ],
+          "backup_factor": 0.35,
+          "acquisition_mode": "can_use_multiple",
+          "description": "AI/professional and high-end gaming GPUs: both provide distinct streaming/encoding benefits; owning multiple is valuable for heavier workloads or resale."
+        },
+        {
+          "items": [
+            "RAM_128",
+            "RAM_64",
+            "RAM_32"
+          ],
+          "backup_factor": 0.2,
+          "acquisition_mode": "can_use_multiple",
+          "description": "Large memory kits preferred for editing and encoding; smaller kits may be used across systems or combined."
+        }
+      ],
+      "complement_groups": [
+        {
+          "items": [
+            "GPU_AI",
+            "CPU_HI",
+            "RAM_128",
+            "SSD_4TB",
+            "MB_PRO",
+            "PSU_1000"
+          ],
+          "bonus": 900,
+          "description": "High-end content creation workstation bundle: accelerator GPU, strong CPU, maximum RAM and storage, professional motherboard and power delivery."
+        },
+        {
+          "items": [
+            "GPU_GAM_HI",
+            "SSD_2TB",
+            "COOL_AIO",
+            "CASE_ATX"
+          ],
+          "bonus": 260,
+          "description": "Streaming-ready gaming system pack with fast storage, cooling, and chassis for good thermals during long broadcasts."
+        }
+      ],
+      "budget_cap": null,
+      "saturation_start": 2,
+      "saturation_penalty": 200,
+      "notes": "Must-have items include a large-memory kit and at least one high-performance GPU; values both professional AI cards and gaming GPUs for different production tasks.",
+      "core_items": [
+        "GPU_AI",
+        "GPU_GAM_HI",
+        "RAM_128",
+        "CPU_HI",
+        "MB_PRO",
+        "SSD_4TB"
+      ],
+      "secondary_items": [
+        "PSU_1000",
+        "COOL_AIO",
+        "SSD_2TB",
+        "CASE_ATX",
+        "RAM_64"
+      ],
+      "low_interest_items": [
+        "CPU_LO",
+        "CPU_MID",
+        "RAM_32",
+        "GPU_VALUE",
+        "MB_STD"
+      ]
+    },
+    {
+      "bidder_id": "overclocker",
+      "archetype_category": "gaming_performance",
+      "role": "Hardware enthusiast focused on extreme cooling, overclocking headroom, and premium supporting components for experimentation and benchmarking.",
+      "identity_text": "A desktop-hardware hobbyist who enjoys assembling systems, experimenting with configurations, and documenting benchmark results.",
+      "budget_range": [
+        2000,
+        8000
+      ],
+      "base_values": {
+        "CPU_HI": 520,
+        "CPU_MID": 310,
+        "GPU_AI": 2900,
+        "GPU_GAM_HI": 1250,
+        "RAM_128": 780,
+        "RAM_64": 340,
+        "MB_PRO": 450,
+        "MB_STD": 190,
+        "SSD_2TB": 220,
+        "SSD_4TB": 430,
+        "PSU_1000": 210,
+        "COOL_AIO": 220,
+        "CASE_ATX": 150
+      },
+      "substitute_groups": [
+        {
+          "items": [
+            "CPU_HI",
+            "CPU_MID"
+          ],
+          "backup_factor": 0,
+          "acquisition_mode": "choose_one",
+          "description": "High-end vs mid CPUs: high-end preferred for best overclocking headroom; mid-range can be bench-tested but offers less absolute headroom."
+        },
+        {
+          "items": [
+            "GPU_AI",
+            "GPU_GAM_HI",
+            "GPU_VALUE"
+          ],
+          "backup_factor": 0.25,
+          "acquisition_mode": "can_use_multiple",
+          "description": "Multiple GPU types are valuable for testing and comparative benchmarking; resell or multi-system deployment retains value."
+        },
+        {
+          "items": [
+            "RAM_64",
+            "RAM_128"
+          ],
+          "backup_factor": 0.15,
+          "acquisition_mode": "can_use_multiple",
+          "description": "Large and mid-size memory kits are both useful for pushing systems under heavy loads and for swapping between testbeds."
+        }
+      ],
+      "complement_groups": [
+        {
+          "items": [
+            "CPU_HI",
+            "MB_PRO",
+            "RAM_64",
+            "COOL_AIO",
+            "PSU_1000"
+          ],
+          "bonus": 480,
+          "description": "Extreme overclocking platform bundle with high-quality motherboard, cooling, and power to sustain elevated clocks."
+        },
+        {
+          "items": [
+            "GPU_GAM_HI",
+            "GPU_AI",
+            "CASE_ATX",
+            "SSD_4TB"
+          ],
+          "bonus": 520,
+          "description": "Multi-GPU test cluster package for comparative workloads, large storage for datasets and benchmark traces, and full-size chassis."
+        }
+      ],
+      "budget_cap": null,
+      "saturation_start": 3,
+      "saturation_penalty": 220,
+      "notes": "Buys multiple variants for testing; places premium on cooling and robust power delivery.",
+      "core_items": [
+        "CPU_HI",
+        "GPU_AI",
+        "GPU_GAM_HI",
+        "MB_PRO",
+        "COOL_AIO",
+        "PSU_1000"
+      ],
+      "secondary_items": [
+        "RAM_128",
+        "RAM_64",
+        "SSD_4TB",
+        "CASE_ATX"
+      ],
+      "low_interest_items": [
+        "CPU_LO",
+        "CPU_MID",
+        "GPU_VALUE",
+        "RAM_32",
+        "MB_STD",
+        "SSD_2TB"
+      ]
+    }
+  ]
+}

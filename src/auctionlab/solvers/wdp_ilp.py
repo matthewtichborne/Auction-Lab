@@ -33,8 +33,18 @@ def _build_candidates(
     cand_by_bidder: Dict[str, List[int]] = {}
     cand_by_item: Dict[Item, List[int]] = {it: [] for it in items}
 
+    # Canonical atom ordering prevents hash-dependent frozenset iteration from
+    # changing CP-SAT's variable/constraint order between Python processes.
+    # Bidder order remains the explicit order supplied by the auction.
     for bid in bids:
-        for atom in bid.atoms:
+        atoms = sorted(
+            bid.atoms,
+            key=lambda atom: (
+                tuple(sorted(atom.bundle)),
+                float(atom.value),
+            ),
+        )
+        for atom in atoms:
             current_index = len(candidates)
             candidates.append((bid.bidder_id, atom.bundle, atom.value))
 
@@ -43,7 +53,7 @@ def _build_candidates(
             else:
                 cand_by_bidder[bid.bidder_id] = [current_index]
 
-            for item in atom.bundle:
+            for item in sorted(atom.bundle):
                 if item not in cand_by_item:
                     raise ValueError(
                         f"Bundle contains item {item} not in items universe"
@@ -51,6 +61,20 @@ def _build_candidates(
                 cand_by_item[item].append(current_index)
 
     return candidates, cand_by_bidder, cand_by_item
+
+
+def _deterministic_solver() -> cp_model.CpSolver:
+    """Return a reproducible single-worker CP-SAT solver.
+
+    Multi-worker CP-SAT may return different members of an optimal tie across
+    otherwise identical runs.  Allocation identity affects true-welfare and
+    VCG-payment diagnostics even when reported welfare is tied, so experiment
+    runners require a stable representative.
+    """
+    solver = cp_model.CpSolver()
+    solver.parameters.num_search_workers = 1
+    solver.parameters.random_seed = 0
+    return solver
 
 
 def _extract_allocation(
@@ -90,7 +114,7 @@ def solve_wdp_xor_ilp(items: List[Item], bids: List[XorBid]) -> WdpResult:
         model.Add(sum(x[t] for t in cand_by_item[item]) <= 1)
 
     model.Maximize(sum(candidates[t][2] * x[t] for t in range(len(candidates))))
-    solver = cp_model.CpSolver()
+    solver = _deterministic_solver()
     status = solver.Solve(model)
 
     if status not in (cp_model.OPTIMAL, cp_model.FEASIBLE):
@@ -143,7 +167,7 @@ def solve_wdp_xor_ilp_max_winners(
     model.Maximize(
         sum(x[t] for t in range(len(candidates)) if candidates[t][1])
     )
-    solver = cp_model.CpSolver()
+    solver = _deterministic_solver()
     status = solver.Solve(model)
 
     if status not in (cp_model.OPTIMAL, cp_model.FEASIBLE):

@@ -55,6 +55,51 @@ def allocation_matches(
     return a == b
 
 
+def payment_diagnostic_fields(
+    full_info: MechanismResult,
+    reported: MechanismResult,
+) -> dict[str, Any]:
+    """Comparable VCG payment diagnostics for detailed and trajectory CSVs."""
+    bidder_ids = set(full_info.payments) | set(reported.payments)
+    payment_absolute_error = sum(
+        abs(
+            reported.payments.get(bidder_id, 0.0)
+            - full_info.payments.get(bidder_id, 0.0)
+        )
+        for bidder_id in bidder_ids
+    )
+    revenue_absolute_error = abs(reported.revenue - full_info.revenue)
+    welfare_denominator = max(full_info.welfare, 1.0)
+    return {
+        "full_info_payments": ";".join(
+            f"{bidder_id}:{full_info.payments.get(bidder_id, 0.0)}"
+            for bidder_id in sorted(bidder_ids)
+        ),
+        "reported_payments": ";".join(
+            f"{bidder_id}:{reported.payments.get(bidder_id, 0.0)}"
+            for bidder_id in sorted(bidder_ids)
+        ),
+        "payment_absolute_error": payment_absolute_error,
+        "payment_error_over_optimum_welfare": (
+            payment_absolute_error / welfare_denominator
+        ),
+        "revenue_absolute_error": revenue_absolute_error,
+        "revenue_absolute_error_over_optimum_welfare": (
+            revenue_absolute_error / welfare_denominator
+        ),
+        "revenue_loss": (
+            (full_info.revenue - reported.revenue) / full_info.revenue
+            if full_info.revenue > 0
+            else ""
+        ),
+        "revenue_absolute_percentage_error": (
+            revenue_absolute_error / full_info.revenue
+            if full_info.revenue > 0
+            else ""
+        ),
+    }
+
+
 def xor_bid_to_str(bid: XorBid) -> str:
     atoms = sorted(
         bid.atoms,
@@ -84,6 +129,18 @@ def reported_bids_to_str(
         f"{bidder_id}={{{xor_bid_to_str(bids_by_bidder[bidder_id])}}}"
         for bidder_id in sorted(bids_by_bidder)
     )
+
+
+def vcg_counterfactuals_to_str(counterfactuals: dict[str, Any]) -> str:
+    """Serialize bidder-removal WDP witnesses for CSV provenance."""
+    parts: list[str] = []
+    for removed_bidder in sorted(counterfactuals):
+        witness = counterfactuals[removed_bidder]
+        parts.append(
+            f"remove={removed_bidder};welfare={witness.welfare};"
+            f"allocation={allocation_to_str(witness.allocation)}"
+        )
+    return "|".join(parts)
 
 
 def refinement_record_to_str(record: RefinementRecord) -> str:
@@ -198,6 +255,7 @@ def sealed_llm_comparison_to_row(
         "efficiency": efficiency,
         "full_info_revenue": full_info.revenue,
         "llm_proxy_revenue": llm_proxy.revenue,
+        **payment_diagnostic_fields(full_info, llm_proxy),
         "full_info_query_count": full_info.query_count,
         "llm_proxy_query_count": llm_proxy.query_count,
         "allocation_match": allocation_matches(
@@ -210,6 +268,12 @@ def sealed_llm_comparison_to_row(
         ),
         "full_info_allocation": allocation_to_str(full_info.allocation),
         "llm_proxy_allocation": allocation_to_str(llm_proxy.allocation),
+        "full_info_vcg_counterfactuals": vcg_counterfactuals_to_str(
+            full_info.metadata["vcg_counterfactuals"]
+        ),
+        "llm_proxy_vcg_counterfactuals": vcg_counterfactuals_to_str(
+            llm_proxy.metadata["vcg_counterfactuals"]
+        ),
         "candidate_bundle_count": llm_proxy.metadata[
             "candidate_bundle_count"
         ],
@@ -294,6 +358,7 @@ def clock_llm_comparison_to_row(
         "efficiency": efficiency,
         "full_info_revenue": full_info.revenue,
         "clock_llm_revenue": clock_llm.revenue,
+        **payment_diagnostic_fields(full_info, clock_llm),
         "full_info_query_count": full_info.query_count,
         "clock_llm_query_count": clock_llm.query_count,
         "clock_demand_query_count": clock_llm.metadata.get(
@@ -314,6 +379,12 @@ def clock_llm_comparison_to_row(
         ),
         "full_info_allocation": allocation_to_str(full_info.allocation),
         "clock_llm_allocation": allocation_to_str(clock_llm.allocation),
+        "full_info_vcg_counterfactuals": vcg_counterfactuals_to_str(
+            full_info.metadata["vcg_counterfactuals"]
+        ),
+        "clock_llm_vcg_counterfactuals": vcg_counterfactuals_to_str(
+            clock_llm.metadata["vcg_counterfactuals"]
+        ),
         "candidate_bundle_count": clock_llm.metadata[
             "candidate_bundle_count"
         ],
@@ -408,6 +479,7 @@ def proxy_sealed_result_to_row(
         "efficiency": efficiency,
         "full_info_revenue": full_info.revenue,
         "proxy_revenue": result.revenue,
+        **payment_diagnostic_fields(full_info, result),
         "allocation_match": allocation_matches(
             full_info.allocation,
             result.allocation,
@@ -417,8 +489,44 @@ def proxy_sealed_result_to_row(
         ),
         "full_info_allocation": allocation_to_str(full_info.allocation),
         "proxy_allocation": allocation_to_str(result.allocation),
+        "full_info_vcg_counterfactuals": vcg_counterfactuals_to_str(
+            full_info.metadata["vcg_counterfactuals"]
+        ),
+        "proxy_vcg_counterfactuals": vcg_counterfactuals_to_str(
+            result.metadata["vcg_counterfactuals"]
+        ),
         "elicitation_rounds": result.metadata["elicitation_rounds"],
+        "requested_elicitation_rounds": result.metadata.get(
+            "requested_elicitation_rounds",
+            result.metadata["elicitation_rounds"],
+        ),
         "feedback_rule": result.metadata["feedback_rule"],
+        "loser_challenger_policy": result.metadata.get(
+            "loser_challenger_policy", "off"
+        ),
+        "stopping_rule": result.metadata.get("stopping_rule", "fixed_rounds"),
+        "incumbent_verification": result.metadata.get(
+            "incumbent_verification", True
+        ),
+        "pivotal_challengers": result.metadata.get(
+            "pivotal_challengers", False
+        ),
+        "scarcity_fallbacks": result.metadata.get(
+            "scarcity_fallbacks", False
+        ),
+        "large_correction_followup": result.metadata.get(
+            "large_correction_followup", False
+        ),
+        "correction_followup_threshold": result.metadata.get(
+            "correction_followup_threshold", 0.25
+        ),
+        "terminal_regret_audit": result.metadata.get(
+            "terminal_regret_audit", False
+        ),
+        "termination_reason": result.metadata.get("termination_reason", ""),
+        "events_blocked_by_refinement_cap": result.metadata.get(
+            "events_blocked_by_refinement_cap", 0
+        ),
         "max_refinements_per_bidder": result.metadata[
             "max_refinements_per_bidder"
         ],
@@ -503,6 +611,37 @@ def proxy_sealed_trajectory_to_rows(
             "num_goods": num_goods,
             "num_bidders": num_bidders,
             "feedback_rule": result.metadata["feedback_rule"],
+            "loser_challenger_policy": result.metadata.get(
+                "loser_challenger_policy", "off"
+            ),
+            "requested_elicitation_rounds": result.metadata.get(
+                "requested_elicitation_rounds",
+                result.metadata["elicitation_rounds"],
+            ),
+            "stopping_rule": result.metadata.get(
+                "stopping_rule", "fixed_rounds"
+            ),
+            "incumbent_verification": result.metadata.get(
+                "incumbent_verification", True
+            ),
+            "pivotal_challengers": result.metadata.get(
+                "pivotal_challengers", False
+            ),
+            "scarcity_fallbacks": result.metadata.get(
+                "scarcity_fallbacks", False
+            ),
+            "large_correction_followup": result.metadata.get(
+                "large_correction_followup", False
+            ),
+            "terminal_regret_audit": result.metadata.get(
+                "terminal_regret_audit", False
+            ),
+            "termination_reason": result.metadata.get(
+                "termination_reason", ""
+            ),
+            "events_blocked_by_refinement_cap": result.metadata.get(
+                "events_blocked_by_refinement_cap", 0
+            ),
             "max_refinement_queries_per_bidder": result.metadata[
                 "max_refinements_per_bidder"
             ],
@@ -513,6 +652,7 @@ def proxy_sealed_trajectory_to_rows(
             "global_efficiency": global_efficiency,
             "mechanism_relative_efficiency": mechanism_relative_efficiency,
             "revenue": result.revenue,
+            **payment_diagnostic_fields(full_info, result),
             "true_surplus": true_welfare - result.revenue,
             "allocation_repr": allocation_to_str(result.allocation),
             "allocation_changed_from_previous_round": allocation_changed,
@@ -568,6 +708,13 @@ def proxy_clock_result_to_row(
         efficiency = true_welfare / full_info.welfare
     else:
         efficiency = 1.0
+    pre_terminal_revenue = result.metadata.get("pre_terminal_revenue")
+    terminal_revenue_abs_error_improvement: float | str = ""
+    if pre_terminal_revenue is not None:
+        terminal_revenue_abs_error_improvement = (
+            abs(pre_terminal_revenue - full_info.revenue)
+            - abs(result.revenue - full_info.revenue)
+        )
 
     return {
         "instance_name": instance_name,
@@ -578,6 +725,7 @@ def proxy_clock_result_to_row(
         "efficiency": efficiency,
         "full_info_revenue": full_info.revenue,
         "proxy_revenue": result.revenue,
+        **payment_diagnostic_fields(full_info, result),
         "rounds": result.rounds if result.rounds is not None else "",
         "allocation_match": allocation_matches(
             full_info.allocation,
@@ -588,10 +736,98 @@ def proxy_clock_result_to_row(
         ),
         "full_info_allocation": allocation_to_str(full_info.allocation),
         "proxy_allocation": allocation_to_str(result.allocation),
+        "full_info_vcg_counterfactuals": vcg_counterfactuals_to_str(
+            full_info.metadata["vcg_counterfactuals"]
+        ),
+        "proxy_vcg_counterfactuals": vcg_counterfactuals_to_str(
+            result.metadata["vcg_counterfactuals"]
+        ),
         "top_k": result.metadata["top_k"],
         "elicited": result.metadata["elicited"],
+        "supplementary_support_policy": result.metadata.get(
+            "supplementary_support_policy", "all_atoms"
+        ),
         "margin_threshold": result.metadata["margin_threshold"],
         "tie_threshold": result.metadata["tie_threshold"],
+        "refine_top_k_frontier": result.metadata.get(
+            "refine_top_k_frontier", False
+        ),
+        "top_k_frontier_policy": result.metadata.get(
+            "top_k_frontier_policy", "off"
+        ),
+        "allocation_counterfactual_frontier": result.metadata.get(
+            "allocation_counterfactual_frontier", False
+        ),
+        "allocation_change_audit": result.metadata.get(
+            "allocation_change_audit", False
+        ),
+        "terminal_stability_audit": result.metadata.get(
+            "terminal_stability_audit", False
+        ),
+        "incumbent_verification": result.metadata.get(
+            "incumbent_verification", True
+        ),
+        "pivotal_challengers": result.metadata.get(
+            "pivotal_challengers", False
+        ),
+        "scarcity_fallbacks": result.metadata.get(
+            "scarcity_fallbacks", False
+        ),
+        "large_correction_followup": result.metadata.get(
+            "large_correction_followup", False
+        ),
+        "correction_followup_threshold": result.metadata.get(
+            "correction_followup_threshold", 0.25
+        ),
+        "gate_near_zero_surplus": result.metadata.get(
+            "gate_near_zero_surplus", False
+        ),
+        "terminal_regret_audit": result.metadata.get(
+            "terminal_regret_audit", False
+        ),
+        "allocation_change_audit_queries": result.metadata.get(
+            "allocation_change_audit_queries", 0
+        ),
+        "allocation_counterfactual_frontier_queries": result.metadata.get(
+            "allocation_counterfactual_frontier_queries", 0
+        ),
+        "terminal_stability_audit_queries": result.metadata.get(
+            "terminal_stability_audit_queries", 0
+        ),
+        "terminal_stability_audit_iterations": result.metadata.get(
+            "terminal_stability_audit_iterations", 0
+        ),
+        "pre_terminal_allocation": (
+            allocation_to_str(result.metadata["pre_terminal_allocation"])
+            if result.metadata.get("pre_terminal_allocation") is not None
+            else ""
+        ),
+        "pre_terminal_reported_welfare": result.metadata.get(
+            "pre_terminal_reported_welfare", ""
+        ),
+        "pre_terminal_true_welfare": result.metadata.get(
+            "pre_terminal_true_welfare", ""
+        ),
+        "pre_terminal_revenue": (
+            "" if pre_terminal_revenue is None else pre_terminal_revenue
+        ),
+        "post_terminal_allocation": (
+            allocation_to_str(result.metadata["post_terminal_allocation"])
+            if result.metadata.get("post_terminal_allocation") is not None
+            else ""
+        ),
+        "post_terminal_reported_welfare": result.metadata.get(
+            "post_terminal_reported_welfare", ""
+        ),
+        "post_terminal_true_welfare": result.metadata.get(
+            "post_terminal_true_welfare", ""
+        ),
+        "post_terminal_revenue": result.metadata.get(
+            "post_terminal_revenue", ""
+        ),
+        "terminal_revenue_abs_error_improvement": (
+            terminal_revenue_abs_error_improvement
+        ),
         "max_refinements_per_bidder": result.metadata[
             "max_refinements_per_bidder"
         ],
@@ -655,5 +891,3 @@ def proxy_clock_result_to_row(
             "final_welfare_minus_best_welfare", ""
         ),
     }
-
-

@@ -12,9 +12,11 @@ from auctionlab.experiments.llm_comparison import (
 )
 from auctionlab.experiments.proxy_sealed_runner import (
     ProxySealedConfig,
+    _competitive_frontier,
     run_proxy_sealed_vcg_experiment,
     run_proxy_sealed_vcg_trajectory,
 )
+from auctionlab.solvers.wdp_ilp import solve_wdp_xor_ilp
 from auctionlab.instances.base import AuctionInstance
 from auctionlab.proxies.base import ElicitationEvent, ProxyStats, RefinementRecord
 from auctionlab.proxies.full_info import FullInfoAuctionProxy
@@ -379,6 +381,7 @@ def test_proxies_must_match_instance_bidder_ids():
     [
         {"elicitation_rounds": -1},
         {"feedback_rule": "bogus"},
+        {"stopping_rule": "bogus"},
         {"max_refinements_per_bidder": -1},
         {"max_total_refinements": -1},
     ],
@@ -534,6 +537,92 @@ def test_trajectory_records_one_row_per_round():
     assert trajectory[2].allocation["i1"] == frozenset({"A"})
     # Round 3: i1's bid rises further to 12 -- still i1.
     assert trajectory[3].allocation["i1"] == frozenset({"A"})
+
+
+def test_no_new_refinements_stopping_rule_ends_at_first_fixed_point():
+    instance, i1, i2 = _make_trajectory_instance_and_proxies()
+
+    trajectory = run_proxy_sealed_vcg_trajectory(
+        instance,
+        [i1, i2],
+        ProxySealedConfig(
+            elicitation_rounds=50,
+            feedback_rule="all_provisional",
+            stopping_rule="no_new_refinements",
+        ),
+    )
+
+    # i1 has three scripted refinements. Round 4 is the first completed
+    # cycle in which the same feedback produces no new query.
+    assert [r.metadata["elicitation_rounds"] for r in trajectory] == [
+        0, 1, 2, 3, 4
+    ]
+    final = trajectory[-1]
+    assert final.metadata["requested_elicitation_rounds"] == 50
+    assert final.metadata["stopping_rule"] == "no_new_refinements"
+    assert final.metadata["termination_reason"] == "no_new_refinements"
+    assert sum(
+        final.metadata["new_refinement_query_count_by_bidder"].values()
+    ) == 0
+
+
+def test_competitive_stopping_advances_to_novel_bundle_before_converging():
+    instance = AuctionInstance(
+        items=["A", "B"],
+        bidder_ids=["i1"],
+        valuations={
+            "i1": {
+                frozenset({"A"}): 10.0,
+                frozenset({"B"}): 9.0,
+            }
+        },
+    )
+    proxy = ScriptedSealedProxy(
+        bidder_id="i1",
+        initial_atoms=[
+            XorAtomicBid(frozenset({"A"}), 10.0),
+            XorAtomicBid(frozenset({"B"}), 9.0),
+        ],
+        refined_value_by_bundle={
+            frozenset({"A"}): 10.0,
+            frozenset({"B"}): 9.0,
+        },
+    )
+
+    trajectory = run_proxy_sealed_vcg_trajectory(
+        instance,
+        [proxy],
+        ProxySealedConfig(
+            elicitation_rounds=10,
+            feedback_rule="competitive",
+            stopping_rule="no_new_refinements",
+        ),
+    )
+
+    assert proxy.stats().refinement_queries == 2
+    assert trajectory[-1].metadata["elicitation_rounds"] == 3
+    assert (
+        trajectory[-1].metadata["termination_reason"]
+        == "no_eligible_refinements"
+    )
+
+
+def test_fixed_rounds_does_not_stop_when_refinements_are_exhausted():
+    instance, i1, i2 = _make_trajectory_instance_and_proxies()
+
+    trajectory = run_proxy_sealed_vcg_trajectory(
+        instance,
+        [i1, i2],
+        ProxySealedConfig(
+            elicitation_rounds=5,
+            feedback_rule="all_provisional",
+            stopping_rule="fixed_rounds",
+        ),
+    )
+
+    assert len(trajectory) == 6
+    assert trajectory[-1].metadata["elicitation_rounds"] == 5
+    assert trajectory[-1].metadata["termination_reason"] == "max_rounds_reached"
 
 
 def test_trajectory_round_print_labels_reported_and_true_welfare_separately(capsys):
@@ -766,3 +855,47 @@ def test_trajectory_new_value_queries_positive_when_refinements_occur():
 
     values = [row.metadata["cumulative_value_queries"] for row in trajectory]
     assert values == sorted(values)
+def test_competitive_loser_challenger_policy_is_optional():
+    instance = AuctionInstance(
+        items=["A", "B"],
+        bidder_ids=["i1", "i2", "i3"],
+        valuations={
+            "i1": {frozenset({"A"}): 10.0},
+            "i2": {frozenset({"B"}): 10.0},
+            "i3": {frozenset({"A", "B"}): 5.0},
+        },
+    )
+    bids = {
+        bidder_id: XorBid(
+            bidder_id=bidder_id,
+            atoms=[
+                XorAtomicBid(bundle=bundle, value=value)
+                for bundle, value in values.items()
+            ],
+        )
+        for bidder_id, values in instance.valuations.items()
+    }
+    provisional = solve_wdp_xor_ilp(instance.items, list(bids.values()))
+
+    without_challengers = _competitive_frontier(
+        instance=instance,
+        bids_by_bidder=bids,
+        provisional=provisional,
+        loser_challenger_policy="off",
+    )
+    with_challengers = _competitive_frontier(
+        instance=instance,
+        bids_by_bidder=bids,
+        provisional=provisional,
+        loser_challenger_policy="shadow_price",
+    )
+
+    assert without_challengers["i3"] == []
+    assert with_challengers["i3"] == [
+        (frozenset({"A", "B"}), "loser_challenger")
+    ]
+
+
+def test_invalid_loser_challenger_policy_is_rejected():
+    with pytest.raises(ValueError, match="loser_challenger_policy"):
+        ProxySealedConfig(loser_challenger_policy="unknown")

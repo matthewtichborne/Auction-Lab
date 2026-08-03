@@ -24,6 +24,31 @@ def test_json_value_response_with_queried_bundle_parses():
     assert parsed.bundle_value == 500.0
 
 
+def test_minimal_value_response_without_queried_bundle_parses():
+    # The preferred, minimal schema: the model is no longer asked (or
+    # required) to echo the bundle back.
+    parsed = parse_value_response(
+        '{"bundle_value": 410, "confidence": 0.9, '
+        '"reasoning_summary": "Budget-limited but useful components."}'
+    )
+
+    assert parsed.queried_bundle is None
+    assert parsed.bundle_value == 410.0
+    assert parsed.confidence == 0.9
+    assert parsed.reasoning_summary == "Budget-limited but useful components."
+
+
+def test_validate_queried_bundle_is_no_op_for_minimal_response_against_any_bundle():
+    # A minimal response carries no bundle opinion at all, so validation
+    # must accept it regardless of which bundle the caller expected --
+    # binding to the expected bundle is the caller's job, not the parser's.
+    parsed = parse_value_response('{"bundle_value": 410}')
+
+    validate_queried_bundle(parsed, frozenset({"CPU_LO", "GPU_GAM", "RAM_64"}))
+    validate_queried_bundle(parsed, frozenset({"IPAD"}))
+    validate_queried_bundle(parsed, frozenset())
+
+
 def test_json_value_response_with_anchor_decomposition_parses():
     parsed = parse_value_response(
         """
@@ -100,6 +125,101 @@ def test_validate_queried_bundle_is_no_op_when_missing():
         LlmValueResponse(bundle_value=500),
         frozenset({"IPAD"}),
     )
+
+
+def test_validate_queried_bundle_accepts_exact_match():
+    parsed = LlmValueResponse(
+        queried_bundle=["GPU_AI", "GPU_GAM"],
+        bundle_value=300,
+    )
+
+    validate_queried_bundle(parsed, frozenset({"GPU_AI", "GPU_GAM"}))
+
+
+def test_validate_queried_bundle_rejects_added_item():
+    parsed = LlmValueResponse(
+        queried_bundle=["GPU_AI", "GPU_GAM", "RAM_64"],
+        bundle_value=300,
+    )
+
+    with pytest.raises(ValueError, match="does not match") as exc_info:
+        validate_queried_bundle(parsed, frozenset({"GPU_AI", "GPU_GAM"}))
+
+    message = str(exc_info.value)
+    assert "added=['RAM_64']" in message
+    assert "removed=[]" in message
+
+
+def test_validate_queried_bundle_rejects_removed_item():
+    parsed = LlmValueResponse(
+        queried_bundle=["GPU_AI"],
+        bundle_value=300,
+    )
+
+    with pytest.raises(ValueError, match="does not match") as exc_info:
+        validate_queried_bundle(parsed, frozenset({"GPU_AI", "GPU_GAM"}))
+
+    message = str(exc_info.value)
+    assert "removed=['GPU_GAM']" in message
+    assert "added=[]" in message
+
+
+def test_validate_queried_bundle_rejects_duplicate_item():
+    parsed = LlmValueResponse(
+        queried_bundle=["GPU_AI", "GPU_AI"],
+        bundle_value=300,
+    )
+
+    with pytest.raises(ValueError, match="duplicate") as exc_info:
+        validate_queried_bundle(parsed, frozenset({"GPU_AI"}))
+
+    assert "queried_bundle=['GPU_AI', 'GPU_AI']" in str(exc_info.value)
+
+
+def test_validate_queried_bundle_rejects_substituted_item():
+    parsed = LlmValueResponse(
+        queried_bundle=["GPU_AI", "RAM_16"],
+        bundle_value=300,
+    )
+
+    with pytest.raises(ValueError, match="does not match") as exc_info:
+        validate_queried_bundle(parsed, frozenset({"GPU_AI", "RAM_64"}))
+
+    message = str(exc_info.value)
+    assert "added=['RAM_16']" in message
+    assert "removed=['RAM_64']" in message
+
+
+def test_validate_queried_bundle_error_includes_expected_and_actual_bundle():
+    parsed = LlmValueResponse(
+        queried_bundle=["GPU_AI", "MB_STD", "RAM_16"],
+        bundle_value=300,
+    )
+
+    with pytest.raises(ValueError) as exc_info:
+        validate_queried_bundle(parsed, frozenset({"GPU_AI", "RAM_16"}))
+
+    message = str(exc_info.value)
+    assert "expected=['GPU_AI', 'RAM_16']" in message
+    assert "actual=['GPU_AI', 'MB_STD', 'RAM_16']" in message
+
+
+def test_validate_queried_bundle_error_includes_raw_response_excerpt():
+    parsed = LlmValueResponse(
+        queried_bundle=["GPU_AI", "GPU_GAM", "RAM_64"],
+        bundle_value=300,
+    )
+
+    with pytest.raises(ValueError) as exc_info:
+        validate_queried_bundle(
+            parsed,
+            frozenset({"GPU_AI", "GPU_GAM"}),
+            raw_response='{"queried_bundle": ["GPU_AI", "GPU_GAM", "RAM_64"], "bundle_value": 300}',
+        )
+
+    message = str(exc_info.value)
+    assert "raw_response_excerpt=" in message
+    assert "RAM_64" in message
 
 
 def test_markdown_fenced_json_value_response_parses():

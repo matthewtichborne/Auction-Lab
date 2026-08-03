@@ -91,7 +91,7 @@ def test_pc_build_metadata_fields():
     assert md["full_valuation_table_size"] == 255
     assert md["domain"] == "pc_build"
     assert md["valuation_model"] == "structured_substitutes_complements"
-    assert md["seed_style"] == "budget_calibrated"
+    assert md["seed_style"] == "brief_qualitative"
 
 
 # ---------------------------------------------------------------------------
@@ -243,8 +243,8 @@ def test_seeds_contain_dollar_amounts():
 def test_seeds_contain_budget_range_language():
     s = make_pc_build_scenario(4, 4, seed=0)
     for bid, seed in s.person_seeds.items():
-        assert "budget" in seed.lower() or "range" in seed.lower(), (
-            f"{bid}: seed should mention budget range"
+        assert "maximum total willingness to pay" in seed.lower(), (
+            f"{bid}: seed should mention one total willingness-to-pay ceiling"
         )
 
 

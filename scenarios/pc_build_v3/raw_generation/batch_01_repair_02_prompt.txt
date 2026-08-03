@@ -1,0 +1,357 @@
+Repair the previous bidder-profile batch response.
+
+DETERMINISTIC VALIDATION ERROR:
+streamer_creator: monetary semantics invalid: saturation_penalty 4.6 is not a meaningful absolute-dollar penalty; expected at least 4.8 for this value scale
+
+Return the complete corrected JSON object for all requested bidders, not a
+patch and not only the affected bidder. Make the minimum economic changes
+needed to resolve the error while preserving every already-valid bidder and
+field.
+
+Cross-field consistency requirements:
+- every substitute-group and complement-group item must use a frozen good ID;
+- every substitute-group member must have a positive base_values entry;
+- choose_one groups require backup_factor 0;
+- can_use_multiple groups require a positive backup_factor;
+- positive core/secondary classifications require positive base values;
+- all frozen goods must remain covered exactly once by the three
+  classification arrays.
+- budget_cap must lie within budget_range;
+- saturation_penalty is an absolute dollar amount, not a fraction, and must
+  be meaningful relative to the profile's positive base values.
+- respect bidder/stratum positive-good limits. Prefer removing marginal
+  standalone positive values and classify those goods as low interest. If a
+  relationship must be narrowed, update its group and base values together;
+  never leave a group member with zero value or remove a required-positive
+  good.
+
+Do not invent a value mechanically if removing an unsupported group member is
+more faithful to the bidder description. Conversely, when the prose and
+classification clearly retain positive interest, add a plausible positive
+value consistent with the profile's existing scale.
+
+ORIGINAL REQUEST:
+You are generating one batch of structured bidder profiles for a
+combinatorial-auction research population. Return JSON only, with exactly one
+top-level field named "bidder_profiles". Do not use markdown fences.
+
+FROZEN GOODS CATALOGUE (use only these IDs):
+[
+  {
+    "id": "CPU_HI",
+    "description": "High-performance 16-core desktop processor for demanding gaming, creative, and compute workloads.",
+    "category": "cpu"
+  },
+  {
+    "id": "CPU_MID",
+    "description": "Balanced 8-core desktop processor offering strong general-purpose performance.",
+    "category": "cpu"
+  },
+  {
+    "id": "CPU_LO",
+    "description": "Entry-level 4-core desktop processor for basic productivity and budget systems.",
+    "category": "cpu"
+  },
+  {
+    "id": "GPU_AI",
+    "description": "Professional accelerator with high VRAM capacity for AI training and technical compute.",
+    "category": "gpu"
+  },
+  {
+    "id": "GPU_GAM_HI",
+    "description": "High-end gaming graphics card for high-resolution and high-frame-rate play.",
+    "category": "gpu"
+  },
+  {
+    "id": "GPU_VALUE",
+    "description": "Value-oriented graphics card for mainstream gaming and light acceleration.",
+    "category": "gpu"
+  },
+  {
+    "id": "RAM_128",
+    "description": "128GB high-speed memory kit for large professional, server, and AI workloads.",
+    "category": "ram"
+  },
+  {
+    "id": "RAM_64",
+    "description": "64GB high-speed memory kit for demanding multitasking, gaming, and creation.",
+    "category": "ram"
+  },
+  {
+    "id": "RAM_32",
+    "description": "32GB mainstream memory kit for general productivity and gaming.",
+    "category": "ram"
+  },
+  {
+    "id": "MB_PRO",
+    "description": "Workstation motherboard with robust power delivery, expansion, and high-speed connectivity.",
+    "category": "motherboard"
+  },
+  {
+    "id": "MB_STD",
+    "description": "Mainstream motherboard suitable for ordinary desktop builds.",
+    "category": "motherboard"
+  },
+  {
+    "id": "SSD_4TB",
+    "description": "High-performance 4TB NVMe solid-state drive for large datasets and media libraries.",
+    "category": "storage"
+  },
+  {
+    "id": "SSD_2TB",
+    "description": "Fast 2TB NVMe solid-state drive for applications, games, and everyday storage.",
+    "category": "storage"
+  },
+  {
+    "id": "PSU_1000",
+    "description": "Efficient 1000W modular power supply for high-performance components.",
+    "category": "power"
+  },
+  {
+    "id": "COOL_AIO",
+    "description": "High-capacity all-in-one liquid CPU cooler for sustained demanding workloads.",
+    "category": "cooling"
+  },
+  {
+    "id": "CASE_ATX",
+    "description": "Well-ventilated ATX chassis supporting the available motherboards and full-size components.",
+    "category": "chassis"
+  }
+]
+
+GENERATE EXACTLY THESE BIDDER ARCHETYPES:
+[
+  {
+    "bidder_id": "enthusiast_gamer",
+    "stratum": "gaming_performance",
+    "brief": "Competitive gamer prioritising maximum frame rate and visual quality.",
+    "identity_text": "A long-time competitive gamer who regularly participates in online tournaments and organised team play."
+  },
+  {
+    "bidder_id": "value_gamer",
+    "stratum": "gaming_performance",
+    "brief": "Price-conscious gamer seeking strong performance per dollar.",
+    "identity_text": "A recreational gamer who spends evenings playing mainstream multiplayer and single-player games with friends."
+  },
+  {
+    "bidder_id": "streamer_creator",
+    "stratum": "gaming_performance",
+    "brief": "Game streamer balancing gaming performance with recording and editing.",
+    "identity_text": "A livestreamer and video creator who broadcasts gameplay and produces edited recordings for an online audience.",
+    "required_positive_goods": [
+      "GPU_AI",
+      "GPU_GAM_HI",
+      "RAM_128"
+    ]
+  },
+  {
+    "bidder_id": "overclocker",
+    "stratum": "gaming_performance",
+    "brief": "Hardware enthusiast who values premium cooling and robust supporting components.",
+    "identity_text": "A desktop-hardware hobbyist who enjoys assembling systems, experimenting with configurations, and documenting benchmark results.",
+    "required_positive_goods": [
+      "GPU_AI"
+    ]
+  }
+]
+
+CURRENT COVERAGE BEFORE THIS BATCH:
+{
+  "CPU_HI": {
+    "positive_bidders": 0,
+    "core_bidders": 0,
+    "positive_strata": []
+  },
+  "CPU_MID": {
+    "positive_bidders": 0,
+    "core_bidders": 0,
+    "positive_strata": []
+  },
+  "CPU_LO": {
+    "positive_bidders": 0,
+    "core_bidders": 0,
+    "positive_strata": []
+  },
+  "GPU_AI": {
+    "positive_bidders": 0,
+    "core_bidders": 0,
+    "positive_strata": []
+  },
+  "GPU_GAM_HI": {
+    "positive_bidders": 0,
+    "core_bidders": 0,
+    "positive_strata": []
+  },
+  "GPU_VALUE": {
+    "positive_bidders": 0,
+    "core_bidders": 0,
+    "positive_strata": []
+  },
+  "RAM_128": {
+    "positive_bidders": 0,
+    "core_bidders": 0,
+    "positive_strata": []
+  },
+  "RAM_64": {
+    "positive_bidders": 0,
+    "core_bidders": 0,
+    "positive_strata": []
+  },
+  "RAM_32": {
+    "positive_bidders": 0,
+    "core_bidders": 0,
+    "positive_strata": []
+  },
+  "MB_PRO": {
+    "positive_bidders": 0,
+    "core_bidders": 0,
+    "positive_strata": []
+  },
+  "MB_STD": {
+    "positive_bidders": 0,
+    "core_bidders": 0,
+    "positive_strata": []
+  },
+  "SSD_4TB": {
+    "positive_bidders": 0,
+    "core_bidders": 0,
+    "positive_strata": []
+  },
+  "SSD_2TB": {
+    "positive_bidders": 0,
+    "core_bidders": 0,
+    "positive_strata": []
+  },
+  "PSU_1000": {
+    "positive_bidders": 0,
+    "core_bidders": 0,
+    "positive_strata": []
+  },
+  "COOL_AIO": {
+    "positive_bidders": 0,
+    "core_bidders": 0,
+    "positive_strata": []
+  },
+  "CASE_ATX": {
+    "positive_bidders": 0,
+    "core_bidders": 0,
+    "positive_strata": []
+  }
+}
+
+ACCEPTED MONETARY SCALES FROM EARLIER BATCHES:
+{}
+
+FINAL POPULATION CONSTRAINTS:
+{
+  "min_positive_bidders_per_good": 6,
+  "max_positive_bidders_per_good": 14,
+  "max_population_interest_density": 0.8,
+  "max_positive_goods_per_bidder_by_stratum": {
+    "gaming_performance": 13,
+    "budget_office": 11,
+    "professional_ai": 13,
+    "reseller_procurement": 13
+  },
+  "max_positive_goods_per_bidder_overrides": {
+    "component_reseller": 16,
+    "system_integrator": 16
+  },
+  "min_core_bidders_per_good": 2,
+  "min_strata_with_positive_value_per_good": 3,
+  "min_profiles_with_substitute_groups": 12,
+  "min_profiles_with_complement_groups": 12,
+  "enforce_monetary_semantics": true,
+  "required_multiway_substitute_categories": [
+    "cpu",
+    "gpu",
+    "ram"
+  ],
+  "choose_one_backup_factor_max": 0.0,
+  "can_use_multiple_backup_factor_min": 0.0,
+  "reseller_substitute_backup_factor_min": 0.7,
+  "high_backup_bidder_ids": [
+    "component_reseller",
+    "system_integrator"
+  ]
+}
+
+For every requested bidder return:
+- bidder_id exactly as supplied;
+- archetype_category exactly equal to the supplied stratum;
+- role: concise 1-3 sentence role description;
+- identity_text copied exactly from the supplied bidder archetype. Do not
+  rewrite, expand, or paraphrase it;
+- budget_range and optional budget_cap, all in dollars. A budget_cap must lie
+  within its budget_range and represents the hard maximum total willingness
+  to pay;
+- base_values using plausible dollar values for every good they value
+  positively; omit genuinely zero-value goods;
+- every good in an archetype's required_positive_goods must have a positive
+  base value. This is a population-coverage obligation, though the good may
+  be classified as core, secondary, or low interest;
+- semantically coherent substitute_groups. CPU, GPU, and RAM groups may
+  contain three alternatives where appropriate. Every group must declare
+  acquisition_mode:
+  - choose_one only when owning multiple members gives no meaningful extra
+    benefit; use backup_factor 0;
+  - can_use_multiple when multiple related alternatives retain value for
+    resale, inventory, redundancy, or deployment to different systems; use
+    a positive backup_factor, with high factors for resellers/integrators.
+  Functional similarity alone is not enough for choose_one. Every
+  substitute-group member must have a positive base value;
+- economically meaningful complete complement_groups of 2-5 goods;
+- saturation_start/saturation_penalty. The penalty is an absolute dollar
+  deduction per squared excess item, not a fraction or percentage. It should
+  normally be at least 1% of the bidder's median positive item value so that
+  it has a meaningful effect;
+- monetary values must remain calibrated with earlier accepted batches:
+  professional/reseller profiles may have larger budgets, but should not
+  dominate merely because a later batch silently changes the dollar scale;
+- core_items, secondary_items, and low_interest_items. Every frozen good must
+  appear in exactly one of these three classifications for each bidder.
+
+Ensure this batch helps close weak columns in CURRENT COVERAGE. Preserve
+diversity: bidders must not all value every good, use identical groups, or
+want the grand bundle. Singleton-category goods PSU_1000, COOL_AIO, and
+CASE_ATX need broad positive interest and should participate in multiple
+complementary systems across the final population.
+
+Apply the interest-density limits in FINAL POPULATION CONSTRAINTS explicitly:
+- a positive base_values entry means genuine positive acquisition interest;
+- omit zero-interest goods from base_values and classify them as low interest;
+- respect each stratum's maximum positive-good count and any bidder override;
+- no good may exceed the population-wide maximum number of positive bidders;
+- broad-interest reseller exceptions do not justify making ordinary gaming,
+  office, or professional profiles interested in the entire catalogue.
+
+Each profile must match this shape:
+{
+  "bidder_id": "...",
+  "archetype_category": "...",
+  "role": "...",
+  "identity_text": "...",
+  "budget_range": [0, 0],
+  "base_values": {"GOOD_ID": 0},
+  "substitute_groups": [
+    {"items": ["A", "B"], "backup_factor": 0,
+      "acquisition_mode": "choose_one", "description": "..."}
+  ],
+  "complement_groups": [
+    {"items": ["A", "B"], "bonus": 100, "description": "..."}
+  ],
+  "budget_cap": null,
+  "saturation_start": null,
+  "saturation_penalty": 0,
+  "notes": "",
+  "core_items": [],
+  "secondary_items": [],
+  "low_interest_items": []
+}
+
+
+PREVIOUS INVALID RESPONSE:
+{"bidder_profiles":[{"bidder_id":"enthusiast_gamer","archetype_category":"gaming_performance","role":"A competitive gaming buyer assembling one premium desktop for high frame rates, low latency, and sustained performance. Premium graphics, processing, power, and cooling receive the highest valuations.","identity_text":"A long-time competitive gamer who regularly participates in online tournaments and organised team play.","budget_range":[2200,4200],"base_values":{"CPU_HI":720,"CPU_MID":390,"GPU_GAM_HI":1450,"GPU_VALUE":480,"RAM_64":310,"RAM_32":150,"MB_PRO":390,"MB_STD":190,"SSD_4TB":360,"SSD_2TB":210,"PSU_1000":240,"COOL_AIO":210,"CASE_ATX":170},"substitute_groups":[{"items":["CPU_HI","CPU_MID"],"backup_factor":0,"acquisition_mode":"choose_one","description":"Alternative processors for the single gaming-system CPU socket; the high-end option commands a substantial performance premium."},{"items":["GPU_GAM_HI","GPU_VALUE"],"backup_factor":0,"acquisition_mode":"choose_one","description":"Mutually exclusive primary gaming-card choices for one desktop build."},{"items":["RAM_64","RAM_32"],"backup_factor":0,"acquisition_mode":"choose_one","description":"Alternative matched memory configurations for the same gaming system."}],"complement_groups":[{"items":["CPU_HI","GPU_GAM_HI","PSU_1000","CASE_ATX"],"bonus":520,"description":"A balanced high-frame-rate platform in which the chassis and power supply support the flagship processing components."},{"items":["CPU_HI","MB_PRO","COOL_AIO"],"bonus":260,"description":"Robust motherboard power delivery and liquid cooling enable the premium processor to sustain boost performance."},{"items":["GPU_GAM_HI","RAM_64","SSD_2TB"],"bonus":190,"description":"Fast memory and storage complement the high-end graphics card for competitive games and large modern titles."}],"budget_cap":4200,"saturation_start":8,"saturation_penalty":3.2,"notes":"Values a single optimized gaming system rather than spare professional or entry-level parts.","core_items":["CPU_HI","GPU_GAM_HI","RAM_64","MB_PRO","PSU_1000","COOL_AIO"],"secondary_items":["CPU_MID","GPU_VALUE","RAM_32","MB_STD","SSD_4TB","SSD_2TB","CASE_ATX"],"low_interest_items":["CPU_LO","GPU_AI","RAM_128"]},{"bidder_id":"value_gamer","archetype_category":"gaming_performance","role":"A budget-focused desktop buyer comparing complete configurations by playable performance per dollar. Mainstream parts are preferred, while premium alternatives retain limited value when deeply discounted.","identity_text":"A recreational gamer who spends evenings playing mainstream multiplayer and single-player games with friends.","budget_range":[900,1700],"base_values":{"CPU_HI":390,"CPU_MID":310,"CPU_LO":150,"GPU_GAM_HI":650,"GPU_VALUE":390,"RAM_128":170,"RAM_64":190,"RAM_32":125,"MB_STD":145,"SSD_2TB":155,"PSU_1000":120,"COOL_AIO":85,"CASE_ATX":105},"substitute_groups":[{"items":["CPU_HI","CPU_MID","CPU_LO"],"backup_factor":0,"acquisition_mode":"choose_one","description":"Three processor tiers compete for the sole CPU position in a price-constrained gaming build."},{"items":["GPU_GAM_HI","GPU_VALUE"],"backup_factor":0,"acquisition_mode":"choose_one","description":"Alternative primary gaming cards, with the value card offering the preferred performance-per-dollar balance."},{"items":["RAM_128","RAM_64","RAM_32"],"backup_factor":0,"acquisition_mode":"choose_one","description":"Alternative matched memory-kit capacities for one desktop; surplus kits provide no meaningful benefit to this buyer."}],"complement_groups":[{"items":["CPU_MID","GPU_VALUE","RAM_32","MB_STD","CASE_ATX"],"bonus":310,"description":"A complete, cost-effective mainstream gaming platform with balanced component capabilities."},{"items":["GPU_GAM_HI","PSU_1000","CASE_ATX"],"bonus":120,"description":"The high-end graphics alternative becomes more practical when paired with sufficient power and a ventilated chassis."},{"items":["CPU_MID","COOL_AIO","SSD_2TB"],"bonus":75,"description":"Improved cooling and fast storage make the preferred midrange processor configuration more responsive and comfortable to use."}],"budget_cap":1700,"saturation_start":7,"saturation_penalty":1.7,"notes":"Strongly discounts expensive capacity and enthusiast features that do not materially improve ordinary gaming.","core_items":["CPU_MID","GPU_VALUE","RAM_32","MB_STD","SSD_2TB","CASE_ATX"],"secondary_items":["CPU_HI","CPU_LO","GPU_GAM_HI","RAM_128","RAM_64","PSU_1000","COOL_AIO"],"low_interest_items":["GPU_AI","MB_PRO","SSD_4TB"]},{"bidder_id":"streamer_creator","archetype_category":"gaming_performance","role":"A dual-purpose buyer building a workstation for high-quality gameplay, live encoding, and post-production. Large memory, fast storage, and both gaming and compute acceleration can contribute to the production workflow.","identity_text":"A livestreamer and video creator who broadcasts gameplay and produces edited recordings for an online audience.","budget_range":[3500,7000],"base_values":{"CPU_HI":850,"CPU_MID":480,"GPU_AI":1850,"GPU_GAM_HI":1550,"RAM_128":720,"RAM_64":390,"RAM_32":180,"MB_PRO":520,"SSD_4TB":520,"SSD_2TB":270,"PSU_1000":300,"COOL_AIO":240,"CASE_ATX":210},"substitute_groups":[{"items":["CPU_HI","CPU_MID"],"backup_factor":0,"acquisition_mode":"choose_one","description":"Alternative processors for the single production workstation, with the high-core option preferred for simultaneous encoding and editing."},{"items":["GPU_AI","GPU_GAM_HI"],"backup_factor":0.3,"acquisition_mode":"can_use_multiple","description":"Either accelerator can fill the primary graphics role, while an additional card retains partial value for rendering, AI-assisted editing, or a secondary production system."},{"items":["RAM_128","RAM_64","RAM_32"],"backup_factor":0,"acquisition_mode":"choose_one","description":"Alternative matched memory capacities for the main streaming workstation; one complete kit is selected."}],"complement_groups":[{"items":["CPU_HI","GPU_GAM_HI","RAM_128","PSU_1000","COOL_AIO"],"bonus":720,"description":"A high-throughput streaming and gaming platform able to sustain gameplay, capture, and encoding concurrently."},{"items":["GPU_AI","RAM_128","SSD_4TB","MB_PRO"],"bonus":610,"description":"A professional content-production subsystem for AI-assisted tools, large editing projects, and accelerated rendering."},{"items":["GPU_GAM_HI","SSD_2TB","CASE_ATX"],"bonus":180,"description":"Fast working storage and a ventilated full-size chassis support reliable game capture with the premium gaming card."}],"budget_cap":7000,"saturation_start":10,"saturation_penalty":4.6,"notes":"Can exploit a secondary accelerator, but derives little value from entry-level processors or mainstream motherboard limitations.","core_items":["CPU_HI","GPU_GAM_HI","RAM_128","MB_PRO","SSD_4TB"],"secondary_items":["CPU_MID","GPU_AI","RAM_64","RAM_32","SSD_2TB","PSU_1000","COOL_AIO","CASE_ATX"],"low_interest_items":["CPU_LO","GPU_VALUE","MB_STD"]},{"bidder_id":"overclocker","archetype_category":"gaming_performance","role":"A hardware experimenter purchasing components for tuning, comparative benchmarking, and documented test builds. Multiple alternatives retain value because they can be evaluated in separate configurations rather than merely stored as backups.","identity_text":"A desktop-hardware hobbyist who enjoys assembling systems, experimenting with configurations, and documenting benchmark results.","budget_range":[3000,6500],"base_values":{"CPU_HI":880,"CPU_MID":500,"CPU_LO":190,"GPU_AI":1280,"GPU_GAM_HI":1500,"RAM_64":390,"RAM_32":170,"MB_PRO":610,"MB_STD":180,"SSD_2TB":190,"PSU_1000":330,"COOL_AIO":300,"CASE_ATX":230},"substitute_groups":[{"items":["CPU_HI","CPU_MID","CPU_LO"],"backup_factor":0.45,"acquisition_mode":"can_use_multiple","description":"Processor tiers are comparable benchmark subjects, and additional CPUs retain value for separate tuning configurations."},{"items":["GPU_AI","GPU_GAM_HI"],"backup_factor":0.45,"acquisition_mode":"can_use_multiple","description":"The two accelerator classes enable comparative gaming, compute, thermal, and efficiency benchmarks across multiple test configurations."},{"items":["RAM_64","RAM_32"],"backup_factor":0.35,"acquisition_mode":"can_use_multiple","description":"Multiple memory capacities and kits support capacity-scaling, timing, and overclocking experiments in different builds."}],"complement_groups":[{"items":["CPU_HI","MB_PRO","COOL_AIO","PSU_1000","CASE_ATX"],"bonus":760,"description":"A complete high-power CPU overclocking platform with robust delivery, thermal headroom, and suitable airflow."},{"items":["GPU_AI","MB_PRO","PSU_1000","CASE_ATX"],"bonus":390,"description":"The professional accelerator becomes a viable compute benchmark platform when paired with expansion capacity, power headroom, and ventilation."},{"items":["CPU_LO","RAM_32","MB_STD","SSD_2TB","CASE_ATX"],"bonus":150,"description":"A complete inexpensive control system for baseline comparisons against tuned premium hardware."}],"budget_cap":6500,"saturation_start":11,"saturation_penalty":4,"notes":"Values broad component variety for active testing, but marginal value declines once enough parts are available to populate several benchmark configurations.","core_items":["CPU_HI","GPU_GAM_HI","MB_PRO","PSU_1000","COOL_AIO","CASE_ATX"],"secondary_items":["CPU_MID","GPU_AI","RAM_64"],"low_interest_items":["CPU_LO","GPU_VALUE","RAM_128","RAM_32","MB_STD","SSD_4TB","SSD_2TB"]}]}
+
+Return JSON only with exactly one top-level field named "bidder_profiles".
+Do not include markdown fences or explanatory prose.

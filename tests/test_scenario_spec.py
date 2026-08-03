@@ -35,7 +35,12 @@ def _minimal_valid_spec_dict() -> dict:
                 "budget_range": [500.0, 1000.0],
                 "base_values": {"CPU": 300.0, "GPU": 400.0, "RAM": 100.0},
                 "substitute_groups": [
-                    {"items": ["CPU", "GPU"], "backup_factor": 0.1, "description": "n/a"}
+                    {
+                        "items": ["CPU", "GPU"],
+                        "backup_factor": 0.1,
+                        "acquisition_mode": "can_use_multiple",
+                        "description": "n/a",
+                    }
                 ],
                 "complement_groups": [
                     {"items": ["CPU", "GPU", "RAM"], "bonus": 50.0, "description": "platform"}
@@ -233,49 +238,3 @@ def test_load_scenario_profile_spec_raises_on_invalid_file(tmp_path: Path):
     path.write_text(json.dumps(data), encoding="utf-8")
     with pytest.raises(Exception):
         load_scenario_profile_spec(path)
-
-
-# ---------------------------------------------------------------------------
-# Export script
-# ---------------------------------------------------------------------------
-
-def test_export_current_pc_build_profiles_builds_valid_spec():
-    from scripts.export_current_pc_build_profiles import build_manual_spec
-
-    spec = build_manual_spec(seed=0)
-    assert isinstance(spec, ScenarioProfileSpec)
-    assert len(spec.goods) == 10
-    assert len(spec.bidder_profiles) == 10
-
-    # Round-trips through validate_spec_dict cleanly.
-    result = validate_spec_dict(scenario_profile_spec_to_dict(spec))
-    assert result.valid, result.errors
-
-
-def test_export_current_pc_build_profiles_writes_loadable_json(tmp_path: Path):
-    from scripts.export_current_pc_build_profiles import build_manual_spec
-
-    spec = build_manual_spec(seed=0)
-    path = tmp_path / "exported.json"
-    write_scenario_profile_spec(spec, path)
-    loaded = load_scenario_profile_spec(path)
-    assert loaded == spec
-
-
-def test_export_is_deterministic_for_fixed_seed():
-    from scripts.export_current_pc_build_profiles import build_manual_spec
-
-    spec_a = build_manual_spec(seed=0)
-    spec_b = build_manual_spec(seed=0)
-    assert spec_a == spec_b
-
-
-def test_v0_manual_spec_file_is_valid_if_present():
-    """If the committed v0 manual spec exists, it must validate cleanly."""
-    path = Path("scenarios/pc_build_v1/pc_build_profiles_v0_manual.json")
-    if not path.exists():
-        pytest.skip("v0 manual spec not generated in this checkout")
-    with open(path, "r", encoding="utf-8") as f:
-        data = json.load(f)
-    result = validate_spec_dict(data)
-    assert result.valid, result.errors

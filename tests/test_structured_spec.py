@@ -1,13 +1,8 @@
-"""Tests for the spec-based PC-build scenario factory.
-
-See scenarios/pc_build_v1/README.md ("A note on exact numeric equivalence
-with the hard-coded factory") for why these tests check *structural*
-equivalence with the hard-coded factory rather than exact value equality,
-and check exact determinism within the spec-based path alone.
-"""
+"""Tests for the spec-based PC-build scenario factory."""
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
@@ -19,27 +14,27 @@ from auctionlab.instances.scenario_spec import (
     scenario_profile_spec_from_dict,
     write_scenario_profile_spec,
 )
-from auctionlab.instances.structured import make_pc_build_scenario
+from auctionlab.instances.structured import (
+    BidderPreferenceProfile,
+    make_pc_build_scenario,
+    render_brief_qualitative_person_seed,
+)
 from auctionlab.instances.structured_spec import (
     categorize_bidder,
     categorize_good,
     make_pc_build_scenario_from_spec,
 )
 
-V0_SPEC_PATH = Path("scenarios/pc_build_v1/pc_build_profiles_v0_manual.json")
+CURRENT_SPEC_PATH = Path(
+    "scenarios/pc_build_v3/pc_build_population_16x16.json"
+)
 
 
 @pytest.fixture(scope="module")
 def v0_spec_path(tmp_path_factory) -> Path:
-    """Use the committed v0 spec if present; otherwise export a fresh one."""
-    if V0_SPEC_PATH.exists():
-        return V0_SPEC_PATH
-    from scripts.export_current_pc_build_profiles import build_manual_spec
-
-    spec = build_manual_spec(seed=0)
-    path = tmp_path_factory.mktemp("spec") / "pc_build_profiles_v0_manual.json"
-    write_scenario_profile_spec(spec, path)
-    return path
+    """Use the current validated population specification."""
+    assert CURRENT_SPEC_PATH.exists()
+    return CURRENT_SPEC_PATH
 
 
 # ---------------------------------------------------------------------------
@@ -68,6 +63,174 @@ def test_from_spec_name_override(v0_spec_path):
     assert s.name == "custom"
 
 
+def _two_bidder_spec_dict() -> dict:
+    bidder = {
+        "bidder_id": "a",
+        "role": "role a",
+        "budget_range": [100.0, 200.0],
+        "base_values": {"CPU": 100.0, "GPU": 100.0},
+        "core_items": ["CPU"],
+    }
+    return {
+        "schema_version": "pc_build_profile_spec_v1",
+        "domain": "pc_build",
+        "goods": [
+            {"id": "CPU", "description": "A processor."},
+            {"id": "GPU", "description": "A graphics card."},
+        ],
+        "bidder_profiles": [bidder],
+    }
+
+
+def test_person_seeds_use_brief_renderer(tmp_path: Path):
+    data = _two_bidder_spec_dict()
+    path = tmp_path / "spec.json"
+    path.write_text(json.dumps(data), encoding="utf-8")
+
+    scenario = make_pc_build_scenario_from_spec(path, num_goods=2, num_bidders=1)
+
+    assert "role a" in scenario.person_seeds["a"]
+    assert (
+        scenario.metadata["profiles"]["a"]["person_seed_source"]
+        == "brief_qualitative_disclosure"
+    )
+    disclosed_budget = scenario.metadata["profiles"]["a"][
+        "disclosed_budget_hint"
+    ]
+    assert disclosed_budget == max(
+        scenario.instance.valuations["a"].values()
+    )
+    assert f"${disclosed_budget:,.0f}" in scenario.person_seeds["a"]
+
+
+def test_identity_text_precedes_brief_selected_goods_disclosure(
+    tmp_path: Path,
+):
+    data = _two_bidder_spec_dict()
+    bidder = data["bidder_profiles"][0]
+    bidder["identity_text"] = "A frozen identity paragraph with no values."
+    bidder["base_values"]["SSD"] = 50.0
+    bidder["secondary_items"] = ["SSD"]
+    data["goods"].append({"id": "SSD", "description": "Storage."})
+    path = tmp_path / "spec.json"
+    path.write_text(json.dumps(data), encoding="utf-8")
+
+    scenario = make_pc_build_scenario_from_spec(
+        path,
+        num_goods=2,
+        num_bidders=1,
+    )
+
+    seed = scenario.person_seeds["a"]
+    assert seed.startswith("A frozen identity paragraph with no values.")
+    assert "mainly interested in cpu" in seed.lower()
+    assert "also be interested in gpu" in seed.lower()
+    assert "ssd" not in seed.lower()
+    assert seed.count("$") == 1
+    assert (
+        scenario.metadata["profiles"]["a"]["person_seed_identity_source"]
+        == "identity_text"
+    )
+
+
+def test_person_seed_metadata_includes_role_and_budget_range(v0_spec_path):
+    scenario = make_pc_build_scenario_from_spec(v0_spec_path, num_goods=4, num_bidders=3)
+    for bidder_id in scenario.instance.bidder_ids:
+        meta = scenario.metadata["profiles"][bidder_id]
+        assert "role" in meta
+        assert "budget_range" in meta
+        assert "person_seed_source" in meta
+
+
+def test_brief_person_seed_uses_one_local_ceiling_and_no_numeric_recipe():
+    profile = BidderPreferenceProfile(
+        bidder_id="gamer",
+        role="A gamer.",
+        budget_range=(2800.0, 3600.0),
+        budget_cap=3500.0,
+        base_values={
+            "CPU_MID": 300.0,
+            "MB_PRO": 280.0,
+            "SSD_2TB": 180.0,
+            "SSD_4TB": 0.0,
+        },
+        substitute_groups=[],
+        complement_groups=[],
+        core_items=frozenset({"MB_PRO"}),
+        secondary_items=frozenset({"CPU_MID", "SSD_2TB"}),
+        low_interest_items=frozenset({"SSD_4TB"}),
+    )
+
+    seed = render_brief_qualitative_person_seed(
+        profile,
+        identity_text="A competitive gamer.",
+        available_goods=["CPU_MID", "MB_PRO", "SSD_4TB", "SSD_2TB"],
+    )
+
+    assert "maximum total willingness to pay" in seed
+    assert "approximately $760" in seed
+    assert seed.count("$") == 1
+    assert "$2,800–$3,600" not in seed
+    assert "$300" not in seed
+    assert "$280" not in seed
+    assert "$180" not in seed
+    assert "not interested in 4TB solid-state storage" in seed
+    assert "backup_factor" not in seed
+    assert "bonus" not in seed
+    assert "diminishing returns" not in seed
+
+
+def test_population_disclosures_never_contain_rich_numeric_recipe():
+    scenario = make_pc_build_scenario_from_spec(
+        "scenarios/pc_build_v3/pc_build_population_16x16.json",
+        num_goods=8,
+        num_bidders=8,
+        seed=0,
+        selection_policy="coverage_stratified",
+    )
+
+    forbidden = (
+        "standalone value",
+        "backup factor",
+        "complementary value bonus",
+        "diminishing returns",
+        "saturation",
+        "budget range",
+        "×",
+    )
+    for disclosure in scenario.person_seeds.values():
+        assert disclosure.count("$") == 1
+        assert "maximum total willingness to pay" in disclosure.lower()
+        for term in forbidden:
+            assert term not in disclosure.lower()
+
+
+def test_disclosed_positive_metadata_excludes_zero_valued_classifications():
+    scenario = make_pc_build_scenario_from_spec(
+        "scenarios/pc_build_v3/pc_build_population_16x16.json",
+        num_goods=8,
+        num_bidders=8,
+        seed=0,
+        selection_policy="coverage_stratified",
+    )
+
+    for bidder_id in scenario.instance.bidder_ids:
+        expected = {
+            item
+            for item in scenario.instance.items
+            if scenario.instance.valuations[bidder_id].get(
+                frozenset({item}), 0.0
+            ) > 0
+        }
+        metadata = scenario.metadata["profiles"][bidder_id]
+        assert set(metadata["disclosed_positive_items"]) == expected
+
+    overclocker = scenario.metadata["profiles"]["overclocker"]
+    assert "GPU_VALUE" in overclocker["low_interest_items"]
+    assert "GPU_VALUE" not in overclocker["disclosed_positive_items"]
+    assert "SSD_4TB" not in overclocker["disclosed_positive_items"]
+
+
 def test_from_spec_rejects_out_of_range_sizes(v0_spec_path):
     with pytest.raises(ValueError):
         make_pc_build_scenario_from_spec(v0_spec_path, num_goods=100, num_bidders=3)
@@ -79,25 +242,6 @@ def test_from_spec_accepts_preloaded_spec(v0_spec_path):
     spec = load_scenario_profile_spec(v0_spec_path)
     s = make_pc_build_scenario_from_spec(spec, num_goods=4, num_bidders=4)
     assert len(s.instance.items) == 4
-
-
-# ---------------------------------------------------------------------------
-# Structural equivalence with the hard-coded factory
-# ---------------------------------------------------------------------------
-
-def test_structural_equivalence_with_hardcoded_factory(v0_spec_path):
-    hardcoded = make_pc_build_scenario(6, 6, seed=0)
-    from_spec = make_pc_build_scenario_from_spec(
-        v0_spec_path, num_goods=6, num_bidders=6, selection_policy="prefix"
-    )
-
-    assert list(from_spec.instance.items) == list(hardcoded.instance.items)
-    assert list(from_spec.instance.bidder_ids) == list(hardcoded.instance.bidder_ids)
-    assert set(from_spec.person_seeds) == set(hardcoded.person_seeds)
-    for bid in hardcoded.instance.bidder_ids:
-        assert len(from_spec.instance.valuations[bid]) == len(
-            hardcoded.instance.valuations[bid]
-        )
 
 
 def test_monotonicity_holds_for_spec_based_valuations(v0_spec_path):
@@ -329,6 +473,29 @@ def test_stratified_goods_selection_is_deterministic(synthetic_platform_spec_pat
     assert s1.instance.valuations == s2.instance.valuations
 
 
+@pytest.mark.parametrize("selection_policy", ["seeded_sample", "stratified"])
+def test_seeded_size_sweeps_are_nested(
+    v0_spec_path,
+    selection_policy,
+):
+    small = make_pc_build_scenario_from_spec(
+        v0_spec_path,
+        num_goods=5,
+        num_bidders=5,
+        seed=3,
+        selection_policy=selection_policy,
+    )
+    large = make_pc_build_scenario_from_spec(
+        v0_spec_path,
+        num_goods=7,
+        num_bidders=7,
+        seed=3,
+        selection_policy=selection_policy,
+    )
+    assert set(small.instance.items) < set(large.instance.items)
+    assert set(small.instance.bidder_ids) < set(large.instance.bidder_ids)
+
+
 def test_stratified_bidder_selection_covers_archetype_buckets(synthetic_platform_spec_path):
     s = make_pc_build_scenario_from_spec(
         synthetic_platform_spec_path, num_goods=8, num_bidders=4, seed=0, selection_policy="stratified"
@@ -388,26 +555,6 @@ def test_stratified_selection_within_bounds(synthetic_platform_spec_path, num_go
     assert len(s.instance.bidder_ids) == num_bidders
     assert len(set(s.instance.items)) == num_goods
     assert len(set(s.instance.bidder_ids)) == num_bidders
-
-
-def test_stratified_fixes_complement_availability_on_real_generated_spec():
-    """Integration-level regression test for the reported bug: under prefix
-    selection, a generated spec's first-N goods can miss a complete
-    complement platform even though the full spec has one."""
-    v2_path = Path("scenarios/pc_build_v1/pc_build_profiles_v2_gemini_trial.json")
-    if not v2_path.exists():
-        pytest.skip("v2 gemini trial spec not present in this checkout")
-
-    from auctionlab.instances.structured import all_nonempty_bundles, value_bundle
-    from scripts.validate_scenario_spec import compute_size_diagnostics
-
-    spec = load_scenario_profile_spec(v2_path)
-    prefix_diag = compute_size_diagnostics(spec, 6, 6, selection_policy="prefix")
-    stratified_diag = compute_size_diagnostics(spec, 6, 6, seed=0, selection_policy="stratified")
-
-    # Not a strict inequality requirement for every possible spec, but true
-    # for the specific v2 trial spec this was reported against.
-    assert stratified_diag["complement_groups_available"] >= prefix_diag["complement_groups_available"]
 
 
 def test_no_llm_import_in_structured_spec_module():

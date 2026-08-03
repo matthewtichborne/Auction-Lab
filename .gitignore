@@ -1,4 +1,6 @@
 outputs/
+cache/
+tmp/
 .pytest_cache/
 __pycache__/
 *.pyc
@@ -10,3 +12,13 @@ venv/
 .venv/
 dist/
 build/
+
+# LaTeX build residue (retain source, bibliography, and final PDF).
+*.aux
+*.bbl
+*.blg
+*.fdb_latexmk
+*.fls
+*.log
+*.out
+*.synctex.gz

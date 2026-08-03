@@ -26,10 +26,17 @@ class LlmCallRecord:
     error: str | None
     latency_seconds: float | None
     model: str | None = None
+    provider: str | None = None
+    llm_role: str | None = None
     attempt: int | None = None
     input_tokens: int | None = None
     output_tokens: int | None = None
     total_tokens: int | None = None
+    cached_input_tokens: int | None = None
+    cached_output_tokens: int | None = None
+    cache_hit: bool | None = None
+    finish_reason: str | None = None
+    response_char_count: int | None = None
 
 
 def current_timestamp() -> str:
@@ -61,14 +68,19 @@ def _to_jsonable(value: Any) -> Any:
 
 
 class LlmCallLogger:
-    def __init__(self, path: str | Path):
+    def __init__(self, path: str | Path, *, append: bool = True):
         self.path = Path(path)
         self._stats: dict[str, CallTypeStats] = {}
         self._mark: dict[str, CallTypeStats] = {}
+        self._records: list[dict[str, Any]] = []
+        if not append:
+            self.path.parent.mkdir(parents=True, exist_ok=True)
+            self.path.write_text("", encoding="utf-8")
 
     def log(self, record: LlmCallRecord) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         payload = _to_jsonable(record)
+        self._records.append(payload)
 
         with self.path.open("a", encoding="utf-8") as f:
             f.write(json.dumps(payload, ensure_ascii=True))
@@ -121,3 +133,44 @@ class LlmCallLogger:
             if delta.calls > 0:
                 result[key] = delta
         return result
+
+    def records(self) -> list[dict[str, Any]]:
+        """Return JSON-safe records logged by this logger instance.
+
+        Unlike reading :attr:`path`, this never includes rows left by an
+        earlier run that reused the same append-only ``calls.jsonl`` file.
+        Frozen-elicitation artefacts use this method to embed exactly the
+        generation calls belonging to the current run.
+        """
+        return [dict(record) for record in self._records]
+
+
+def call_stats_from_records(
+    records: list[dict[str, Any]] | tuple[dict[str, Any], ...],
+    *,
+    logical_cached_tokens: bool = False,
+) -> dict[str, CallTypeStats]:
+    """Reconstruct per-prompt statistics from serialized call records.
+
+    Frozen elicitation replay makes no live initial calls, but scalability
+    reporting still needs the logical cost of the opening interaction. When
+    ``logical_cached_tokens`` is true, cached token counts take precedence
+    over the zero live-call counts recorded during a cache replay.
+    """
+    stats: dict[str, CallTypeStats] = {}
+    for record in records:
+        if not record.get("success"):
+            continue
+        key = str(record.get("prompt_type") or "unknown")
+        input_tokens = record.get("input_tokens")
+        output_tokens = record.get("output_tokens")
+        if logical_cached_tokens:
+            if record.get("cached_input_tokens") is not None:
+                input_tokens = record["cached_input_tokens"]
+            if record.get("cached_output_tokens") is not None:
+                output_tokens = record["cached_output_tokens"]
+        row = stats.setdefault(key, CallTypeStats())
+        row.calls += 1
+        row.input_tokens += int(input_tokens or 0)
+        row.output_tokens += int(output_tokens or 0)
+    return stats

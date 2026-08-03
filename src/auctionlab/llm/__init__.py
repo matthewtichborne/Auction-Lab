@@ -1,4 +1,9 @@
 from auctionlab.llm.bundles import bundle_sort_key, generate_candidate_bundles
+from auctionlab.llm.cache import (
+    CacheMissError,
+    CachingLlmClient,
+    LlmResponseCache,
+)
 from auctionlab.llm.clients import (
     LlmClient,
     MockLlmClient,
@@ -27,6 +32,14 @@ from auctionlab.llm.prompts import (
     describe_bundle,
     format_transcript_context,
 )
+from auctionlab.llm.value_calibration import (
+    NO_CALIBRATION,
+    CalibrationConfigError,
+    ValueCalibration,
+    load_calibration_config,
+    resolve_cli_calibration,
+    write_calibration_config,
+)
 from auctionlab.llm.schemas import (
     LlmAtomicBidResponse,
     LlmDemandQueryResponse,
@@ -37,6 +50,11 @@ from auctionlab.llm.schemas import (
 )
 
 __all__ = [
+    "NO_CALIBRATION",
+    "CacheMissError",
+    "CachingLlmClient",
+    "CalibrationConfigError",
+    "LlmResponseCache",
     "LlmAtomicBidResponse",
     "LlmClient",
     "LlmCallLogger",
@@ -51,6 +69,7 @@ __all__ = [
     "MockLlmClient",
     "OpenAICompatibleLlmClient",
     "TranscriptEntry",
+    "ValueCalibration",
     "bundle_sort_key",
     "build_demand_query_prompt",
     "build_initial_proxy_question_prompt",
@@ -61,9 +80,12 @@ __all__ = [
     "extract_json_object",
     "format_transcript_context",
     "generate_candidate_bundles",
+    "load_calibration_config",
     "parse_demand_query_response",
     "parse_natural_language_response",
     "parse_proxy_question_response",
     "parse_value_response",
+    "resolve_cli_calibration",
     "validate_queried_bundle",
+    "write_calibration_config",
 ]

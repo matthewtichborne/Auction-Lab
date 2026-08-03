@@ -293,6 +293,36 @@ def test_initial_preference_question_event_on_inner_proxy():
     assert proxy.event_log[0].event_type == INITIAL_PREFERENCE_QUESTION
 
 
+def test_initial_preference_question_event_uses_supplied_scenario_question():
+    client = MockLlmClient([
+        '{"answer": "I want item A most."}',
+    ])
+    person = LlmPersonSimulator(
+        bidder_id="b1",
+        scenario_description="Test.",
+        person_seed="I want A.",
+        item_descriptions=ITEM_DESCRIPTIONS,
+        client=client,
+    )
+    proxy = LlmInferredXorProxy(bidder_id="b1", person=person)
+
+    response = proxy.handle_event(ProxyElicitationEvent(
+        event_type=INITIAL_PREFERENCE_QUESTION,
+        bidder_id="b1",
+        mechanism="init",
+        payload={"question": "What fits your needs?"},
+    ))
+
+    assert response.payload["question"] == "What fits your needs?"
+    assert proxy.nl_transcript == [
+        ("What fits your needs?", "I want item A most.")
+    ]
+    assert len(client.calls) == 1
+    assert "Create an initial preference-elicitation question" not in (
+        client.calls[0]
+    )
+
+
 def test_generate_candidate_bundles_event_updates_adapter_list():
     """GENERATE_CANDIDATE_BUNDLES event via adapter updates candidate_bundles."""
     # Set up proxy with interest_map pre-populated.

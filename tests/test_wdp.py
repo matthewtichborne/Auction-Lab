@@ -78,3 +78,18 @@ def test_max_winners_matches_unique_optimum_when_no_tie_exists(
 
     assert stage2.welfare == stage1.welfare
     assert stage2.allocation == expected_toy_allocation
+
+
+def test_wdp_tie_result_is_independent_of_atom_order():
+    items = ["A", "B"]
+    atoms = [
+        XorAtomicBid(bundle=frozenset({"A"}), value=10.0),
+        XorAtomicBid(bundle=frozenset({"B"}), value=10.0),
+    ]
+    bids_forward = [XorBid(bidder_id="bidder", atoms=atoms)]
+    bids_reverse = [XorBid(bidder_id="bidder", atoms=list(reversed(atoms)))]
+
+    forward = solve_wdp_xor_ilp(items, bids_forward)
+    reverse = solve_wdp_xor_ilp(items, bids_reverse)
+
+    assert forward == reverse

@@ -23,6 +23,7 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Literal
 from typing import Any
 
 from pydantic import BaseModel, Field, model_validator
@@ -45,6 +46,7 @@ class GoodSpec(BaseModel):
 class SubstituteGroupSpec(BaseModel):
     items: list[str] = Field(min_length=1)
     backup_factor: float = Field(ge=0.0, le=1.0)
+    acquisition_mode: Literal["choose_one", "can_use_multiple"]
     description: str = ""
 
 
@@ -61,6 +63,15 @@ class ComplementGroupSpec(BaseModel):
 class BidderProfileSpec(BaseModel):
     bidder_id: str = Field(min_length=1)
     role: str = Field(min_length=1)
+    archetype_category: str | None = None
+    """Optional explicit population stratum used by balanced samplers."""
+    identity_text: str | None = None
+    """Optional frozen, value-free identity paragraph.
+
+    Runtime person seeds place this paragraph before the deterministic
+    auction-specific preference description.  Older specs can omit it:
+    ``role`` then supplies the identity paragraph without any live LLM call.
+    """
     budget_range: tuple[float, float]
     base_values: dict[str, float]
     substitute_groups: list[SubstituteGroupSpec] = Field(default_factory=list)
@@ -92,6 +103,11 @@ class BidderProfileSpec(BaseModel):
         if not any(v > 0 for v in self.base_values.values()):
             errors.append(
                 f"bidder {self.bidder_id!r}: must have at least one positive base value"
+            )
+
+        if self.identity_text is not None and not self.identity_text.strip():
+            errors.append(
+                f"bidder {self.bidder_id!r}: identity_text must be non-empty when present"
             )
 
         if errors:
