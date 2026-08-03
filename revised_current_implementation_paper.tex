@@ -94,6 +94,99 @@
   archivePrefix = {arXiv},
   primaryClass  = {cs.AI}
 }
+
+@article{vickrey1961counterspeculation,
+  author  = {Vickrey, William},
+  title   = {Counterspeculation, Auctions, and Competitive Sealed Tenders},
+  journal = {The Journal of Finance},
+  year    = {1961},
+  volume  = {16},
+  number  = {1},
+  pages   = {8--37},
+  doi     = {10.1111/j.1540-6261.1961.tb02789.x}
+}
+
+@article{groves1973incentives,
+  author  = {Groves, Theodore},
+  title   = {Incentives in Teams},
+  journal = {Econometrica},
+  year    = {1973},
+  volume  = {41},
+  number  = {4},
+  pages   = {617--631},
+  doi     = {10.2307/1914085}
+}
+
+@incollection{ausubel2006ascending,
+  author    = {Ausubel, Lawrence M. and Milgrom, Paul},
+  title     = {Ascending Proxy Auctions},
+  booktitle = {Combinatorial Auctions},
+  editor    = {Cramton, Peter and Shoham, Yoav and Steinberg, Richard},
+  publisher = {MIT Press},
+  year      = {2006},
+  chapter   = {3}
+}
+
+@incollection{ausubel2006clockproxy,
+  author    = {Ausubel, Lawrence M. and Cramton, Peter and Milgrom, Paul},
+  title     = {The Clock-Proxy Auction: A Practical Combinatorial Auction Design},
+  booktitle = {Combinatorial Auctions},
+  editor    = {Cramton, Peter and Shoham, Yoav and Steinberg, Richard},
+  publisher = {MIT Press},
+  year      = {2006},
+  chapter   = {5},
+  pages     = {115--138}
+}
+
+@article{day2008core,
+  author  = {Day, Robert and Milgrom, Paul},
+  title   = {Core-Selecting Package Auctions},
+  journal = {International Journal of Game Theory},
+  year    = {2008},
+  volume  = {36},
+  number  = {3--4},
+  pages   = {393--407},
+  doi     = {10.1007/s00182-007-0100-7}
+}
+
+@inproceedings{amershi2019guidelines,
+  author    = {Amershi, Saleema and Weld, Dan and Vorvoreanu, Mihaela and Fourney, Adam and Nushi, Besmira and Collisson, Penny and Suh, Jina and Iqbal, Shamsi and Bennett, Paul N. and Inkpen, Kori and Teevan, Jaime and Kikin-Gil, Ruth and Horvitz, Eric},
+  title     = {Guidelines for Human--AI Interaction},
+  booktitle = {Proceedings of the 2019 CHI Conference on Human Factors in Computing Systems},
+  year      = {2019},
+  pages     = {1--13},
+  doi       = {10.1145/3290605.3300233}
+}
+
+@inproceedings{strubell2019energy,
+  author    = {Strubell, Emma and Ganesh, Ananya and McCallum, Andrew},
+  title     = {Energy and Policy Considerations for Deep Learning in {NLP}},
+  booktitle = {Proceedings of the 57th Annual Meeting of the Association for Computational Linguistics},
+  year      = {2019},
+  pages     = {3645--3650},
+  doi       = {10.18653/v1/P19-1355}
+}
+
+@misc{bcsCode,
+  author       = {{BCS, The Chartered Institute for IT}},
+  title        = {{BCS} Code of Conduct},
+  howpublished = {\url{https://www.bcs.org/membership-and-registrations/become-a-member/bcs-code-of-conduct/}},
+  note         = {Accessed 3 August 2026}
+}
+
+@misc{acmCode,
+  author       = {{Association for Computing Machinery}},
+  title        = {{ACM} Code of Ethics and Professional Conduct},
+  year         = {2018},
+  howpublished = {\url{https://www.acm.org/code-of-ethics}}
+}
+
+@misc{icoAI,
+  author       = {{Information Commissioner's Office}},
+  title        = {Guidance on {AI} and Data Protection},
+  howpublished = {\url{https://ico.org.uk/for-organisations/uk-gdpr-guidance-and-resources/artificial-intelligence/guidance-on-ai-and-data-protection/}},
+  note         = {Accessed 3 August 2026}
+}
 \end{filecontents*}
 
 \documentclass[11pt,a4paper]{article}
@@ -134,7 +227,7 @@
 \newcommand{\projectprogramme}{MSc Computational Finance}
 \newcommand{\projectmodule}{7CCSMPRJ}
 \newcommand{\projectsubmission}{Individual Project Submission 2025/26}
-\newcommand{\projectwordcount}{9,576}
+\newcommand{\projectwordcount}{11,948}
 
 \title{\projecttitle}
 \author{\projectauthor}
@@ -212,7 +305,7 @@ copyright of the project.
 \begin{document}
 \pagenumbering{gobble}
 \makeprojectcover
-\pagenumbering{arabic}
+\pagenumbering{roman}
 
 \begin{abstract}
 Combinatorial auctions allow bidders to express values for packages of goods,
@@ -236,6 +329,15 @@ information that sparse elicitation leaves unresolved.
 \end{abstract}
 
 \noindent\textbf{Keywords:} combinatorial auctions; preference elicitation; large language models; proxy bidders; XOR bids; VCG; clock auctions; sealed auctions.
+
+\clearpage
+\tableofcontents
+\clearpage
+\listoffigures
+\clearpage
+\listoftables
+\clearpage
+\pagenumbering{arabic}
 
 \section{Introduction}
 
@@ -309,39 +411,157 @@ Caching, chunked structured output, fail-closed parsing, frozen replay, and
 detailed provenance are supporting experimental controls rather than
 independent conceptual contributions.
 
+The report proceeds from related auction and human--AI work to the formal
+proxy model and inference pipeline. It then defines the sealed and clock event
+environments, describes the implementation and experimental protocol, and
+evaluates support reduction, policy selection, scalability, allocation, and
+payment recovery. The discussion separates supported findings from
+limitations, and Section~\ref{sec:professional-issues} considers the safeguards
+that real bidder-facing deployment would require.
+
 \section{Background and Literature Review}
 
-This project lies at the intersection of classical preference elicitation, iterative and clock combinatorial auctions, machine-learning-powered elicitation, and recent work on LLM-based proxies.
+This project lies at the intersection of mechanism design, selective
+preference elicitation, machine-learning-powered auctions, and human--AI
+interaction. The relevant literature supplies two different kinds of
+constraint. Auction theory identifies the information needed for allocation
+and payment; elicitation and interaction research asks how that information
+can be acquired without requiring a person to enumerate an exponential bid.
 
-\subsection{Classical Preference Elicitation}
+\subsection{Combinatorial Allocation, Incentives, and Communication}
 
-Combinatorial auctions are appropriate when bidders have complements or substitutes across goods. Their central obstacle is communication. Nisan and Segal show that, for general valuation classes, efficient allocation can require exponential communication \citep{nisan2006communication}. This result motivates restricted bid languages, structured valuation classes, approximation, and selective elicitation.
+Combinatorial auctions are appropriate when values contain complements or
+substitutes, but unrestricted valuations contain one number for every bundle.
+Nisan and Segal show that efficient allocation can require exponential
+communication for general valuation classes \citep{nisan2006communication}.
+This is not merely a solver problem: no interface can guarantee exact general
+preference recovery from a small transcript. Restricted bid languages,
+structured valuation classes, approximation, and selective elicitation are
+therefore substantive assumptions rather than implementation conveniences.
 
-Lahaie and Parkes connect preference elicitation to computational learning theory. They show how value queries can simulate membership queries and how certain demand-style queries can play the role of equivalence-query counterexamples \citep{lahaie2004applying}. This gives formal query-complexity guarantees for some structured valuation classes and bid languages, but it still assumes that bidders can answer formal economic queries. In practice, value and demand queries may be cognitively demanding.
+Vickrey and Groves mechanisms establish the benchmark for efficient truthful
+allocation under quasilinear private values \citep{vickrey1961counterspeculation,groves1973incentives}.
+In a combinatorial setting, however, a winner's VCG payment depends on welfare
+in a bidder-removal economy. Accurate allocation and accurate payment thus
+require overlapping but non-identical information. This distinction motivates
+the paper's separate allocation and VCG-witness diagnostics. It also limits
+deployment claims: sparse reported bids can reproduce the efficient allocation
+while leaving counterfactual payments inaccurate.
+
+\subsection{Selective Preference Elicitation}
+
+Lahaie and Parkes connect preference elicitation to computational learning
+theory. Value queries can simulate membership queries, while some demand-style
+queries resemble equivalence-query counterexamples
+\citep{lahaie2004applying}. The analysis supplies guarantees for particular
+valuation classes and bid languages, but assumes that bidders can answer the
+formal queries they receive. In practice, choosing a maximum value for an
+arbitrary bundle or solving a demand problem at posted prices may itself be a
+substantial cognitive task.
 
 Work on structured classes such as strong substitutes illustrates the same tension. Goldberg, Lock, and Marmolejo-Cossío study learning strong-substitutes demand via queries and show efficient algorithms for restricted settings but hard lower bounds in more general cases \citep{goldberg2020learning}. The theoretical lesson is that structure matters. The practical question is how to extract useful structure from human preference descriptions without requiring full formal revelation.
 
 \subsection{Iterative and Clock Auction Design}
 
-Iterative combinatorial auctions reduce upfront communication by eliciting information over rounds. Parkes surveys mechanisms that alternate between provisional allocations, price updates, and new bids \citep{parkes2006iterative}. iBundle is an early ascending package auction in which prices and provisional allocations guide bidders towards welfare-relevant packages \citep{parkes2000ibundle}. Such mechanisms motivate the iterative sealed arm in this project: each round solves a provisional WDP and uses the result to select bundles for refinement.
+Iterative combinatorial auctions reduce upfront reporting by eliciting
+information over rounds. Parkes surveys mechanisms that alternate among
+provisional allocations, prices, and new bids \citep{parkes2006iterative}.
+iBundle uses ascending package prices to direct bidders towards
+welfare-relevant packages \citep{parkes2000ibundle}; ascending proxy auctions
+similarly use bidder-side proxy agents to express package demand
+\citep{ausubel2006ascending}. These mechanisms motivate the sealed arm's use
+of repeated WDP feedback, but they do not by themselves resolve how a
+non-expert person communicates values to a proxy.
 
-Clock auctions provide a different information structure. They post item prices, ask bidders for demanded bundles, and raise prices on over-demanded goods. In a clock setting, the proxy observes a price path and a sequence of revealed demands rather than only provisional winners and losers. These revealed bundles can subsequently delimit a sparse supplementary and counterfactual verification frontier.
+Clock auctions expose a different information structure: item prices generate
+a demand path before supplementary package information is considered. The
+clock--proxy design combines transparent price discovery with a later package
+phase intended to recover efficiency \citep{ausubel2006clockproxy}. Core-selecting
+payments are often used in package-auction practice to address properties of
+VCG outcomes and incentives \citep{day2008core}. The present clock is therefore
+CCA-inspired rather than a production CCA: its purpose is to test whether the
+revealed-demand path can serve as a relevance filter for later exact
+verification.
 
-The clock mechanism in this paper is CCA-inspired but not a full production CCA. It uses ascending item prices, top-surplus demand, accumulated supplementary XOR atoms, and final VCG payments. It does not implement activity-constrained supplementary bidding, optimised price increments, or core-selecting payments. This is intentional: the clock is used as a price-discovery environment whose revealed-demand path restricts later exact verification.
+That simplification creates a deliberate trade-off. Using VCG in both arms
+makes reported-payment error comparable, while omitting activity constraints,
+optimised increments, and core-selecting payments prevents the clock results
+from being interpreted as evidence about a deployable spectrum-auction design.
 
 \subsection{Machine-Learning-Powered Elicitation}
 
-Machine-learning-powered combinatorial auctions use partial bidder responses to train surrogate valuation models and select future queries. MLCA uses machine learning to guide value-query selection and reports high efficiency with comparatively few elicited values \citep{brero2019mlca}. iMLCA extends this idea by allowing interval bids and activity rules to reduce the reporting burden associated with exact values \citep{lubin2020imlca}.
+Machine-learning-powered combinatorial auctions use partial bidder responses to
+train surrogate valuation models and select future queries. MLCA uses learned
+models to guide value-query selection and reports high efficiency with
+comparatively few elicited values \citep{brero2019mlca}. iMLCA adds interval
+bids and activity rules, weakening the requirement that every answer be an
+exact value \citep{lubin2020imlca}. These approaches learn a numerical model
+from formal responses; the current project instead begins with qualitative
+language and separates support inference from numerical scoring.
 
-More recent ML-powered clock mechanisms emphasise demand queries. Soumalias et al. propose an ML-powered combinatorial clock auction that learns from demand-query information and selects queries with high clearing potential \citep{soumalias2023mlcca}. Later work combines prices, bids, and values in a hybrid auction design \citep{soumalias2024mlhca}. This literature establishes welfare-versus-query-cost evaluation as a natural empirical standard and shows that query type matters. The present project differs by replacing direct human interaction with a proxy-mediated natural-language interface.
+More recent ML-powered clock mechanisms learn from demand information and
+select queries with high clearing potential \citep{soumalias2023mlcca}; hybrid
+work combines prices, bids, and values \citep{soumalias2024mlhca}. This
+literature establishes welfare-versus-query-cost analysis as a natural
+standard and shows that the mechanism's observable state should influence
+query selection. It also provides the principal alternative to the event
+framework: a learned acquisition rule could choose queries directly. The
+deterministic event policies used here sacrifice such adaptivity for
+auditability and exact paired replay.
 
 \subsection{LLM-Based Proxies}
 
-Huang et al. propose LLM-based proxies for accelerated preference elicitation in combinatorial auctions \citep{huang2025llmproxies}. Their proxies interact with a mechanism on behalf of a bidder, maintain internal state, and use natural-language questions, value queries, demand queries, and learned bid representations. This is the closest conceptual predecessor to the present work. It motivates the distinction between a person model and a proxy model, and it demonstrates that LLMs can reduce the burden of translating qualitative preferences into formal bids.
+Huang et al. propose LLM-based proxies for accelerated preference elicitation
+in combinatorial auctions \citep{huang2025llmproxies}. Their proxies maintain
+state and combine natural-language questions with formal value and demand
+queries. Soumalias et al. likewise study LLM-powered elicitation in
+combinatorial assignment \citep{soumalias2025llmassignment}. These studies
+show the promise of language as an interface, but the numerical reliability of
+LLM answers and the mechanism-specific nature of the interaction remain design
+concerns.
 
-Soumalias et al. study LLM-powered preference elicitation in combinatorial assignment \citep{soumalias2025llmassignment}. Their work similarly highlights the importance of protocol design, query cost, and LLM response variability.
+Human--AI interaction research adds requirements that auction metrics alone do
+not capture. Guidance synthesised by \citet{amershi2019guidelines} emphasises
+setting expectations, exposing uncertainty, supporting correction, and giving
+people control when an AI system is wrong. In an auction, an inference error
+can affect payments and other bidders as well as interface satisfaction. The
+current frozen experiment does not test those human outcomes, but its explicit
+interest map, query log, and deterministic correction path are steps towards
+an inspectable rather than opaque proxy.
 
-The gap addressed here is mechanism portability. Existing LLM-proxy work is largely mechanism-specific. This paper asks how one event-driven proxy architecture behaves when embedded in sealed and clock mechanisms that expose different feedback signals.
+\subsection{Synthesis and Design Requirements}
+
+Table~\ref{tab:literature-synthesis} locates the project relative to the main
+approaches. The gap addressed is not a claim to solve unrestricted preference
+recovery. It is the absence of a reproducible interface that separates
+language-based support discovery, provisional numerical scoring, and
+mechanism-specific exact refinement while allowing different auction formats
+to share the same initial proxy state.
+
+\begin{table}[htbp]
+\centering
+\small
+\caption{Relationship between prior elicitation approaches and this project.}
+\label{tab:literature-synthesis}
+\begin{tabular}{@{}p{0.20\linewidth}p{0.20\linewidth}p{0.23\linewidth}p{0.27\linewidth}@{}}
+\toprule
+Approach & Main evidence & Strength & Boundary motivating this work \\
+\midrule
+Classical selective elicitation & Formal value or demand queries & Theoretical query guarantees for structured values & Assumes a bidder can answer the formal query \\
+ML-powered auctions & Values, intervals, or demands & Learns where further information is useful & Numerical model and acquisition policy are often mechanism-specific \\
+Clock/proxy auctions & Ascending prices and package demand & Price discovery restricts relevant outcomes & Does not supply a natural-language person--proxy interface \\
+LLM proxy elicitation & Language plus formal queries & Translates qualitative goals into bids & Model noise and protocol portability remain concerns \\
+This project & Validated disclosure, inferred support, provisional values, and event-selected exact VQs & Paired, auditable support--score--refine pipeline & Frozen non-agentic policy and one generated domain \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+The synthesis yields five requirements used in the design below: preserve a
+hidden full-information benchmark; distinguish candidate omission from value
+misranking; prevent model calls from accessing hidden values; expose a common
+typed event boundary while retaining mechanism-specific triggers; and freeze
+initial inference so that sealed and clock outcomes are paired. These choices
+trade open-ended proxy autonomy for experimental identification.
 
 \section{Formal Framework}
 
@@ -882,20 +1102,99 @@ Clock with supplementary VCG & Ascending prices, top-three revealed demands, ter
 
 \section{Implementation}
 
-The repository separates deterministic auction logic from preparation-time
-LLM orchestration. Pure auction modules receive typed proxy states and emit
-typed events; they do not call model providers. Preparation modules generate
-and validate environments, disclosures, interest maps, and provisional values,
-then write immutable elicitation packs. Experiment runners replay those packs,
-solve XOR WDPs, answer selected exact queries, and record trajectories and VCG
-witnesses. This separation permits paired mechanism experiments without
-repeated model sampling.
+\subsection{Architecture and Information Boundaries}
 
-Every preparation call and auction refinement is auditable through structured
-JSON, CSV, JSONL, and SQLite artifacts. The main text reports only controls
-needed to interpret the experiment; model identifiers, token limits, parse and
-retry behaviour, cache semantics, frozen policy parameters, artifact paths,
-and reconstruction commands are collected in Appendix~\ref{app:reproducibility}.
+The implementation separates preparation-time model orchestration from
+deterministic auction execution. Figure~\ref{fig:system-architecture} shows the
+principal data path. Environment generation produces private structured
+profiles and deterministic full valuation tables. A person model sees only a
+profile-specific disclosure contract; the bidder-proxy model sees the public
+catalogue and accepted opening exchange. The resulting interest map,
+candidate support, and raw provisional values are frozen. Mechanism runners
+then replay that state without making any model call.
+
+\begin{figure}[htbp]
+\centering
+\fbox{\begin{minipage}{0.92\linewidth}
+\centering
+Human population design \(\rightarrow\) generated private profiles
+\(\rightarrow\) deterministic hidden values\\[0.35em]
+\(\Downarrow\) validated disclosure contract and public catalogue\\[0.35em]
+Opening answer \(\rightarrow\) interest map \(\rightarrow\) candidate bundles
+\(\rightarrow\) provisional values\\[0.35em]
+\(\Downarrow\) frozen elicitation pack\\[0.35em]
+\begin{tabular}{ccc}
+Iterative sealed events & \hspace{1.1cm} & Ascending clock events \\
+\(\downarrow\) & & \(\downarrow\) \\
+Exact refinements and WDP & & Price discovery and terminal closure
+\end{tabular}\\[0.35em]
+\(\Downarrow\) paired trajectories, VCG witnesses, and offline analysis
+\end{minipage}}
+\caption{Implementation architecture and one-way information flow. Hidden
+values are available to deterministic value-query lookup and evaluation, but
+not to the person-facing or bidder-proxy model calls.}
+\label{fig:system-architecture}
+\end{figure}
+
+Pure mechanism modules receive typed bids and proxy states, solve the XOR WDP,
+and emit typed elicitation events. They do not construct prompts or know which
+model generated the initial state. The event-policy layer converts eligible
+mechanism evidence into a bidder--bundle refinement request. The proxy adapter
+deduplicates that request, performs an exact hidden-value lookup in the
+principal experiment, replaces the corresponding provisional atom, and
+returns the revised formal bid. This boundary is what permits the same proxy
+representation to support two mechanism-specific policies.
+
+\subsection{Reliability, Replay, and Auditability}
+
+Preparation uses strict schemas and fail-closed validation. A malformed or
+semantically inconsistent structured response is retried with diagnostic
+context and then aborts; the principal pipeline does not silently substitute
+an all-items interest map or a mass of artificial zero values. Provisional
+values are chunked because a single response over a large candidate support
+was both slow and prone to truncation. Chunk outputs are validated against the
+requested bundle identifiers before they are merged.
+
+Long-running preparation is interruption-safe. Each accepted response is
+committed to a SQLite cache keyed by the rendered prompt, provider, model, and
+response-relevant settings. Completed goods-specific master packs can be
+resumed and projected to smaller bidder sets without regenerating responses.
+Every frozen pack includes an environment fingerprint and is rejected if
+replayed against a different catalogue or bidder composition. Raw and parsed
+responses, token counts, cache status, model roles, and configuration hashes
+remain available for audit, while the public serialisation omits the complete
+hidden valuation table.
+
+\subsection{Engineering Challenges and Verification}
+
+Several design features arose from observed failures rather than from the
+initial architecture alone. Generated profiles sometimes omitted goods or
+placed zero-valued goods in substitute groups; schema checks, deterministic
+repairs, and population-level economic preflight now prevent such profiles
+from entering the experiment. Broad bidder interest caused candidate growth
+and oversized model responses; person-specific exclusion, evidence-grounded
+\texttt{choose\_one} filtering, and chunking address different parts of that
+problem. Repeated mechanism signals initially risked asking the same exact
+question more than once; deduplication is therefore enforced on the
+bidder--bundle pair independently of event type.
+
+Clock experiments also showed why termination must be distinguished from a
+runtime safeguard. A 50-round limit truncated legitimate low-increment price
+paths, so the final design stops on zero excess demand and uses 500 rounds only
+as a fault safeguard. Finally, high allocation efficiency initially obscured
+large payment errors. Explicit winner-removal witness logging was added so
+that a refinement can be classified by both allocation incidence and
+reported-VCG-counterfactual incidence.
+
+The repository's offline suite contains 880 tests spanning these boundaries:
+WDP and payment invariants, mechanism trajectories, event deduplication,
+interest-map filtering, parsing and failure policies, caching, frozen-pack
+integrity, calibration, scalability grids, and final input hashes. Mock
+clients ensure that tests require no credentials or live calls. The suite and
+its limitations are described in Appendix~\ref{app:test-suite}. Model
+identifiers, token limits, frozen policy parameters, artifact paths, and
+reconstruction commands are collected in
+Appendix~\ref{app:reproducibility}.
 
 \section{Experimental Design}
 
@@ -959,6 +1258,44 @@ The mechanism comparison starts sealed and clock arms from the same frozen
 interest-map-plus-PV state. Policy selection is reported separately through
 five-seed \(8\times8\) ablations; the selected policies are then frozen for
 the 95-case scalability evaluation.
+
+\subsection{Theory-Led Expectations}
+
+The following expectations were formulated to interpret the final analysis;
+they are not presented as preregistered hypotheses. First, excluding one good
+removes every bundle containing it, so the absolute support reduction from an
+interest map should grow rapidly with the number of goods even though the
+remaining candidate set can still be exponential. Second, a multiplicative
+PV calibration should improve outcomes only when valuation error contains a
+transferable systematic component; held-out payment error, rather than the PC
+auction result, must therefore select the scale.
+
+Third, sealed allocation feedback should search a broader frontier and use
+more exact queries than a clock policy restricted to price-revealed demands.
+That broader search should usually improve allocation recovery, while the
+clock should offer a query-efficiency advantage. Fourth, selectively replacing
+provisional atoms with exact values need not improve hidden welfare
+monotonically: the WDP continues to compare corrected atoms with uncorrected
+ones. Finally, VCG payment reconstruction should lag allocation recovery
+because each winning payment requires an additional bidder-removal optimum.
+
+\begin{table}[htbp]
+\centering
+\small
+\caption{Theory-led expectations and their empirical tests.}
+\label{tab:expectations}
+\begin{tabular}{@{}p{0.29\linewidth}p{0.32\linewidth}p{0.29\linewidth}@{}}
+\toprule
+Expectation & Rationale & Principal test \\
+\midrule
+Interest maps increasingly reduce support & Exclusion removes all supersets containing an excluded item & Candidate counts along the goods path \\
+Calibration reduces systematic PV error & A common multiplicative bias can transfer across domains & Held-out synthetic payment error \\
+Sealed searches more broadly; clock queries less & Repeated allocation frontiers versus revealed-demand eligibility & Paired efficiency and exact VQs \\
+Selective correction can be non-monotonic & Exact and provisional atoms coexist in the WDP & Round trajectories and worse-case counts \\
+Payment recovery lags allocation recovery & VCG requires winner-removal welfare & Efficiency versus normalised payment error \\
+\bottomrule
+\end{tabular}
+\end{table}
 
 \subsection{Metrics}
 
@@ -1170,7 +1507,7 @@ compositions, but it is not validation on a newly generated population.
 \begin{figure}[htbp]
     \centering
     \includegraphics[width=\linewidth]{outputs/final/analytic_package_v3/figures/event_policy_ablation.pdf}
-    \caption{Five-seed \(8\times8\) event-policy ablations. The selected
+    \caption[Five-seed event-policy ablations at the \(8\times8\) anchor.]{Five-seed \(8\times8\) event-policy ablations. The selected
     policies are adaptive competitive-frontier refinement for sealed and the
     revealed-winner sandwich for clock.}
     \label{fig:policy-ablation}
@@ -1445,6 +1782,138 @@ the payment counterfactual frontier. VCG-witness logging makes this
 distinction observable, but the residual 32--36\% normalised payment error
 shows that the selected sparse policies do not fully close bidder-removal
 support.
+
+\subsection{Expected and Observed Behaviour}
+
+The results broadly support the theory-led expectations in
+Table~\ref{tab:expectations}, but with qualifications. Support reduction does
+increase materially with goods, although broad-interest profiles preserve a
+large residual candidate set. Held-out calibration reduces mean payment error
+in seven of nine calibration environments, supporting a systematic component
+without implying universal improvement. Sealed refinement is more
+query-intensive and has higher mean efficiency than clock, as expected, but
+the clustered interval on their efficiency difference crosses zero. The
+observed worse cases confirm the predicted non-monotonicity of partial
+correction. Most strongly, both mechanisms recover allocations much more
+accurately than VCG payments, confirming that payment-counterfactual closure
+is a distinct information problem. Thus the evidence supports the proposed
+information decomposition more clearly than it establishes a ranking between
+the two mechanisms.
+
+\section{Legal, Social, Ethical, and Professional Issues}
+\label{sec:professional-issues}
+
+The experiments use synthetic bidder profiles and make no decision about an
+identifiable person. Consequently, the frozen dataset is not evidence that a
+deployed system would satisfy legal or ethical obligations. Deployment would
+process preference descriptions, budgets, purchasing priorities, and auction
+behaviour that may be commercially sensitive or personally identifying. The
+relevant professional question is therefore not whether this synthetic study
+itself collected personal data, but what safeguards would be required before
+the architecture mediated real bids.
+
+\subsection{Accessibility, Autonomy, and Distributional Effects}
+
+Natural language can lower the formal barrier to expressing package
+preferences, which is the project's principal social motivation. It may help
+participants who cannot construct XOR bids or reason over an exponential
+bundle space. That benefit is currently an architectural possibility, not a
+measured outcome: there is no human-subject evidence about comprehension,
+effort, disability access, or whether repeated exact questions are easier than
+direct bidding.
+
+Language interfaces can also create unequal performance. Dialect, verbosity,
+domain vocabulary, disability-related communication patterns, and familiarity
+with auctions may influence what the proxy infers. A false exclusion is
+particularly consequential because it removes every bundle containing the
+item. Human--AI guidance recommends communicating system capability, making
+uncertainty visible, and supporting correction when the system is wrong
+\citep{amershi2019guidelines}. A deployed proxy should therefore show the
+person its interest map, acquisition modes, candidate omissions, provisional
+winning bid, and material later corrections. The person should be able to
+amend them before commitment and choose direct participation instead. Such
+controls would preserve bidder autonomy rather than treating conversational
+convenience as consent to an opaque economic action.
+
+Errors have distributional effects beyond the proxy's owner. An overstated
+bid can displace another bidder or alter their payment; an understated bid can
+leave goods inefficiently allocated. Model quality, compute budget, or access
+to a stronger private proxy could therefore become a source of market
+advantage. Equal model access, standardised disclosure of proxy use, and audit
+of error rates across participant groups would be necessary deployment
+questions. The current generated archetypes are economic roles, not a fairness
+evaluation over protected characteristics.
+
+\subsection{Privacy, Confidentiality, and Security}
+
+The ICO's AI guidance organises data protection around lawfulness, fairness
+and transparency, purpose limitation, data minimisation, accuracy, storage
+limitation, security, and accountability \citep{icoAI}. Applying those
+principles would require a documented lawful basis, a clear explanation of
+what information is sent to each model provider, collection of no more detail
+than elicitation requires, retention and deletion rules, access controls, and
+appropriate handling of international processing. A budget or intended
+purchase could reveal financial circumstances or confidential business
+strategy even when it is not a conventional identity field.
+
+The implementation provides useful technical controls: model roles receive
+only the information they require; frozen public packs exclude hidden
+valuation tables; cache entries and calls are logged; schemas reject malformed
+outputs; and deterministic replay avoids repeatedly transmitting disclosures.
+These controls support minimisation and auditability but do not themselves
+establish regulatory compliance. Real deployment would additionally require
+provider contracts and retention settings, encryption and credential
+management, incident response, user access and deletion procedures, and a
+data-protection impact assessment where the processing risk warrants one.
+
+The language interface also enlarges the attack surface. A catalogue or user
+answer could contain prompt injection; a compromised cache could expose
+preferences; and an auction participant might intentionally manipulate a
+proxy into misclassifying alternatives. Fail-closed parsing protects the
+formal schema, not the semantic truth of an adversarial answer. Provider-side
+content isolation, authenticated catalogue data, least-privilege access,
+signed frozen artifacts, semantic anomaly tests, and manual review for
+high-value auctions would therefore be appropriate safeguards.
+
+\subsection{Economic Trustworthiness and Professional Responsibility}
+
+The BCS Code requires attention to privacy, security, wellbeing, the
+environment, third-party rights, non-discrimination, equal access, competence,
+and honest reporting of system performance \citep{bcsCode}. The ACM Code
+similarly emphasises avoiding harm, honesty, fairness, privacy, security, and
+thorough evaluation of system risks \citep{acmCode}. These duties are relevant
+because the proxy performs an economically consequential translation rather
+than merely generating advisory text.
+
+The paper accordingly reports negative as well as positive results: selective
+correction sometimes reduces welfare, payment errors remain substantial, and
+the five seeds do not represent independently generated populations. A
+professional deployment should not advertise the observed 94.8\% or 92.8\%
+mean efficiency as a guarantee for another domain. It should expose when a
+bundle remains provisional, distinguish allocation confidence from payment
+confidence, retain an appeal or correction path, and assign responsibility
+for loss caused by model, software, or operator error. Strategic behaviour is
+also unresolved. A proxy that is optimised to win rather than report faithfully
+could amplify manipulation, while deterministic exact lookups in this study
+assume away that conflict.
+
+Intellectual-property and sustainability issues are smaller but not absent.
+Deployment must respect model and dependency licences, catalogue rights, and
+ownership of generated profiles and transaction records. Hosted inference also
+has financial and environmental costs; prior work shows why computation and
+energy should be reported rather than treated as free \citep{strubell2019energy}.
+This implementation records calls, tokens, latency, and cache hits, and frozen
+replay removes auction-stage model calls. It does not measure electricity or
+carbon, so no environmental reduction is claimed. A production assessment
+should compare the one-off inference cost with the human and computational
+costs of alternative auction interfaces.
+
+Taken together, the responsible interpretation is conditional. The framework
+provides inspectable information boundaries, deterministic replay, correction
+hooks, and audit records that could support a trustworthy service. It does not
+yet demonstrate inclusive usability, legal compliance, strategic safety, or
+acceptable payment risk. Those are deployment requirements and evaluation
+tasks, not consequences that follow automatically from high simulated welfare.
 
 \section{Limitations}
 
