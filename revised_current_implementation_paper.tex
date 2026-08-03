@@ -129,13 +129,90 @@
 \newcommand{\IM}{\operatorname{IM}}
 \newcommand{\PV}{\operatorname{PV}}
 
-\title{LLM Proxy-Assisted Combinatorial Auctions\\
-\large A Modular Elicitation-Event Framework and Empirical Evaluation}
-\author{Matthew Targett\\ \small MSc Computational Finance}
+\newcommand{\projecttitle}{LLM Proxy-Assisted Combinatorial Auctions: A Modular Elicitation-Event Framework and Empirical Evaluation}
+\newcommand{\projectauthor}{Matthew Targett}
+\newcommand{\projectprogramme}{MSc Computational Finance}
+\newcommand{\projectmodule}{7CCSMPRJ}
+\newcommand{\projectsubmission}{Individual Project Submission 2025/26}
+\newcommand{\projectwordcount}{9,576}
+
+\title{\projecttitle}
+\author{\projectauthor}
 \date{\today}
 
+\newcommand{\makeprojectcover}{%
+\begin{titlepage}
+\thispagestyle{empty}
+
+\begin{minipage}[t]{0.37\textwidth}
+\raggedright
+\textbf{Faculty of Natural and\\Mathematical Sciences}\\
+Department of Informatics
+\end{minipage}\hfill
+\begin{minipage}[t]{0.34\textwidth}
+\raggedright
+King's College London\\
+Strand Campus, London,\\
+United Kingdom
+\end{minipage}\hfill
+\begin{minipage}[t]{0.23\textwidth}
+\raggedleft
+\includegraphics[width=3.25cm]{Final Report Latex Template (7CCSMPRJ)/kcl.png}
+\end{minipage}
+
+\vspace{1.0cm}
+
+\begin{center}
+\textbf{\projectmodule\\[0.35cm]\projectsubmission}
+\end{center}
+
+\vspace{0.45cm}
+
+\renewcommand{\arraystretch}{1.45}
+\begin{tabular}{@{}p{0.28\textwidth}>{\raggedright\arraybackslash}p{0.65\textwidth}@{}}
+\textbf{Name:} & \projectauthor \\
+\textbf{Student Number:} & \rule{0.55\textwidth}{0.4pt} \\
+\textbf{Degree Programme:} & \projectprogramme \\
+\textbf{Project Title:} & \projecttitle \\
+\textbf{Supervisor:} & \rule{0.55\textwidth}{0.4pt} \\
+\textbf{Word Count:} & \projectwordcount \\
+\end{tabular}
+
+\vspace{0.8cm}
+
+\noindent\fbox{%
+\begin{minipage}{0.94\textwidth}
+\begin{center}
+\textbf{RELEASE OF PROJECT}
+\end{center}
+Following the submission of your project, the Department would like to make
+it publicly available via the library electronic resources. You will retain
+copyright of the project.
+\end{minipage}}
+
+\vspace{0.45cm}
+
+\noindent Check the appropriate box below\\[0.25cm]
+\(\square\) I \textbf{agree} to the release of my project\\[0.18cm]
+\(\square\) I \textbf{do not agree} to the release of my project
+
+\vfill
+
+\noindent
+\begin{minipage}{0.58\textwidth}
+\textbf{Signature:} \rule{0.68\textwidth}{0.4pt}
+\end{minipage}%
+\begin{minipage}{0.40\textwidth}
+\textbf{Date:} \today
+\end{minipage}
+
+\end{titlepage}
+}
+
 \begin{document}
-\maketitle
+\pagenumbering{gobble}
+\makeprojectcover
+\pagenumbering{arabic}
 
 \begin{abstract}
 Combinatorial auctions allow bidders to express values for packages of goods,
