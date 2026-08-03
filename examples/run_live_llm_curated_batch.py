@@ -33,9 +33,7 @@ from auctionlab.experiments.proxy_sealed_runner import (
 from auctionlab.experiments.runner import run_sealed_vcg_experiment
 from auctionlab.experiments.run_config import (
     EVENT_POLICIES,
-    PRESETS,
     add_calibration_fields,
-    apply_preset,
     build_run_config_document,
     calibration_summary_fields,
     collect_arm_stats,
@@ -44,17 +42,11 @@ from auctionlab.experiments.run_config import (
     explicitly_set_args,
     event_policy_summary_fields,
     format_run_config,
-    late_reflection_candidates_to_rows,
-    late_reflection_records_to_rows,
-    late_reflection_summary_fields,
     refinement_records_to_rows,
     resolve_event_policy,
     write_run_config_json,
 )
-from auctionlab.instances.nl_scenarios import (
-    NaturalLanguageAuctionScenario,
-    curated_natural_language_scenarios,
-)
+from auctionlab.instances.nl_types import NaturalLanguageAuctionScenario
 from auctionlab.llm.bundles import generate_candidate_bundles
 from auctionlab.llm.cache import (
     DEFAULT_CACHE_PATH,
@@ -71,7 +63,6 @@ from auctionlab.llm.frozen_elicitation import (
     validate_pack_for_scenario,
     write_frozen_elicitation_pack,
 )
-from auctionlab.llm.late_reflection import LateReflectionConfig
 from auctionlab.llm.interest_map import (
     interest_map_accuracy,
     interest_map_candidate_counts,
@@ -93,7 +84,6 @@ from auctionlab.llm.value_calibration import (
     resolve_cli_calibration,
 )
 from auctionlab.proxies.base import RefinementRecord
-from auctionlab.proxies.baselines.dnf_learning import DnfLearningProxy
 from auctionlab.proxies.events import (
     GENERATE_CANDIDATE_BUNDLES,
     INFER_INTEREST_MAP,
@@ -101,22 +91,11 @@ from auctionlab.proxies.events import (
     INITIAL_PREFERENCE_QUESTION,
     ProxyElicitationEvent,
 )
-from auctionlab.proxies.baselines.hybrid import HybridProxy
 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Run live LLM proxy mechanisms on curated scenarios."
-    )
-    parser.add_argument(
-        "--preset",
-        choices=list(PRESETS),
-        default=None,
-        help=(
-            "Apply a recommended default configuration. Individual flags "
-            "that appear on the command line override preset values. "
-            "Available: " + ", ".join(PRESETS)
-        ),
     )
     parser.add_argument(
         "--provider",
@@ -497,11 +476,8 @@ def parse_args() -> argparse.Namespace:
             "Resolved elicitation-event specification. 'custom' preserves "
             "the granular --event-* and mechanism flags. 'recommended' "
             "enables incumbent/counterfactual verification and scarcity "
-            "fallbacks for both mechanisms, plus sealed-only large-correction "
-            "follow-up. 'final-v1' freezes that sealed policy and uses the "
-            "clock-specific targeted-v1 framework. 'final-v2' preserves the "
-            "sealed policy and uses frozen clock-revealed single-pass VCG "
-            "witness verification. 'final-v3' preserves the sealed policy "
+            "fallbacks for the sealed-policy ablation, plus sealed-only "
+            "large-correction follow-up. 'final-v3' preserves that sealed policy "
             "and uses revealed-witness/winner sandwich closure."
         ),
     )
@@ -822,138 +798,6 @@ def parse_args() -> argparse.Namespace:
         ),
     )
     parser.add_argument(
-        "--late-reflection",
-        action="store_true",
-        help=(
-            "Enable the late_reflection elicitation event: a targeted NL "
-            "check-in built from accumulated auction context, fired once "
-            "before the final sealed round (--sealed-elicitation-rounds) "
-            "and/or once when the clock nears clearing "
-            "(--late-reflection-near-clearing-threshold), for the proxy "
-            "sealed/clock arms only. Disabled by default. Recommended "
-            "treatment: --late-reflection-scope allocation_marginal "
-            "--late-reflection-max-bidders 3 --late-reflection-followup "
-            "mechanism_default --late-reflection-followups-per-bidder 1 "
-            "--late-reflection-max-tokens 1000."
-        ),
-    )
-    parser.add_argument(
-        "--late-reflection-scope",
-        choices=["allocation_relevant", "all_bidders", "allocation_marginal"],
-        default="allocation_relevant",
-        help=(
-            "Which bidders get a late_reflection question. "
-            "'allocation_marginal' (recommended): scores every bidder by "
-            "deterministic marginality signals (currently allocated / "
-            "allocation changed last round / near-top losing bundle / "
-            "large bundle contesting an allocated good / recent clock "
-            "near_tie-near_zero_surplus-demand_changed / current demand on "
-            "a contested or positive-excess-demand good), then queries only "
-            "the top --late-reflection-max-bidders scorers -- see "
-            "auctionlab.llm.late_reflection.sealed_marginality_scores/"
-            "clock_marginality_scores. Avoids the 'allocation_relevant' "
-            "problem: under a broad sealed feedback rule like "
-            "all_provisional, almost every bidder receives allocated_bundle "
-            "or lost_interested_bundle feedback, so allocation_relevant "
-            "effectively asks everyone -- a live 10x10 run showed this made "
-            "late reflection a net-negative broad revaluation sweep rather "
-            "than a targeted elicitation event. 'allocation_relevant' "
-            "(default, kept for backward compatibility): sealed bidders who "
-            "receive pre-final-round sealed feedback, or clock bidders with "
-            "a recent local clock event / demand touching a contested good "
-            "-- unbounded, binary in/out. 'all_bidders': every bidder (for "
-            "testing/robustness)."
-        ),
-    )
-    parser.add_argument(
-        "--late-reflection-max-bidders",
-        type=int,
-        default=None,
-        help=(
-            "Only consulted when --late-reflection-scope allocation_marginal: "
-            "cap on how many top-scoring marginal bidders get queried, "
-            "after ranking by descending marginality score (bidder_id "
-            "tie-break). None/omitted (default) means no cap -- every "
-            "positive-score bidder is selected. 0 caps at zero bidders "
-            "(selects nobody); this is NOT the 0-means-unlimited convention "
-            "used by some other flags in this project -- None is 'no cap' "
-            "here. Recommended: 3 or 4. Negative values are rejected."
-        ),
-    )
-    parser.add_argument(
-        "--late-reflection-followup",
-        choices=["none", "value_query", "demand_query", "mechanism_default"],
-        default="mechanism_default",
-        help=(
-            "Follow-up query type after a late_reflection answer. "
-            "'mechanism_default' (default): value_query for BOTH sealed and "
-            "clock -- the reflection question is now always framed as an "
-            "explicit pairwise/marginal comparison, so a direct value_query "
-            "over the comparison pair tests it precisely; a live 10x10 run "
-            "showed a late demand_query near clock clearing mostly just "
-            "confirmed current demand without improving pricing error. "
-            "Pass 'demand_query' explicitly to opt back into a "
-            "price-conditioned satisfaction check. The LLM's own "
-            "suggested_followup is always logged but never overrides this "
-            "flag."
-        ),
-    )
-    parser.add_argument(
-        "--late-reflection-followups-per-bidder",
-        type=int,
-        default=1,
-        help=(
-            "Cap on follow-up VQ/DQ bundles per bidder per late_reflection "
-            "trigger. Recommended: 1, paired with "
-            "--late-reflection-scope allocation_marginal and "
-            "--late-reflection-max-bidders -- one targeted NL question plus "
-            "one targeted value query for only the highest-ranked "
-            "allocation-marginal bidders. A wider follow-up budget (2) is "
-            "still fully supported and populates the pairwise "
-            "pricing-error columns in curated_late_reflection_records.csv, "
-            "but combined with a broad scope it turned late reflection into "
-            "a net-negative broad revaluation sweep in a live 10x10 run --  "
-            "prefer narrowing the scope (allocation_marginal + "
-            "--late-reflection-max-bidders) over widening the follow-up "
-            "budget."
-        ),
-    )
-    parser.add_argument(
-        "--late-reflection-near-clearing-threshold",
-        type=int,
-        default=2,
-        help=(
-            "Clock only: fire late_reflection the first round where total "
-            "positive excess demand (sum of max(0, excess_demand_g) over "
-            "goods) drops to or below this value."
-        ),
-    )
-    parser.add_argument(
-        "--late-reflection-recent-window-rounds",
-        type=int,
-        default=3,
-        help=(
-            "Clock only: number of trailing rounds (including the "
-            "triggering round) used for the allocation_relevant/"
-            "allocation_marginal scopes' 'recent local clock event' / "
-            "'recently contested good' checks."
-        ),
-    )
-    parser.add_argument(
-        "--late-reflection-max-tokens",
-        type=int,
-        default=1000,
-        help=(
-            "max_tokens for the late_reflection question-generation call "
-            "only -- built as a separate client from --max-tokens (the "
-            "shared value/demand-query budget). A live 10x10 run truncated "
-            "the pairwise reflection JSON at ~296 output tokens under the "
-            "default --max-tokens=300, causing every late-reflection row to "
-            "fail to parse; this gives the larger, more verbose pairwise "
-            "schema response its own budget."
-        ),
-    )
-    parser.add_argument(
         "--skip-baselines",
         action="store_true",
         help=(
@@ -1061,33 +905,6 @@ def parse_args() -> argparse.Namespace:
             "ωvd1/ωvd2: how the LLM proxy refines a candidate bundle's "
             "value -- a direct value query, or a demand query ('are you "
             "satisfied with this bundle at these prices?') first."
-        ),
-    )
-    parser.add_argument(
-        "--proxy-type",
-        choices=["llm", "dnf", "hybrid"],
-        default="llm",
-        help=(
-            "Proxy implementation used for elicited proxy-mediated runs "
-            "(--elicited-clock / --sealed-elicitation-rounds): 'llm' is the "
-            "NL-and-inference proxy, 'dnf' is the non-LLM "
-            "proper-learning baseline (ωxor), 'hybrid' is ωh (LLM proxy for "
-            "the first --hybrid-alpha refinements, then ωxor)."
-        ),
-    )
-    parser.add_argument(
-        "--hybrid-alpha",
-        type=int,
-        default=10,
-        help="ωh: number of early refinements handled by the LLM proxy.",
-    )
-    parser.add_argument(
-        "--hybrid-delta",
-        type=float,
-        default=0.95,
-        help=(
-            "ωh: per-refinement decay factor applied to the LLM proxy's "
-            "remaining inferred values after the switch to ωxor."
         ),
     )
     parser.add_argument(
@@ -2071,33 +1888,23 @@ def select_scenarios(
     scenario_spec: str | None = None,
     selection_policy: str = "prefix",
 ) -> list[NaturalLanguageAuctionScenario]:
-    """Select scenarios by name/seed-type, or generate a single pc_build scenario."""
-    if names and len(names) == 1 and names[0] == "pc_build":
-        if scenario_spec is not None:
-            from auctionlab.instances.structured_spec import make_pc_build_scenario_from_spec
-            scenarios = [
-                make_pc_build_scenario_from_spec(
-                    scenario_spec,
-                    num_goods,
-                    num_bidders,
-                    seed=scenario_seed,
-                    selection_policy=selection_policy,
-                )
-            ]
-        else:
-            from auctionlab.instances.structured import make_pc_build_scenario
-            scenarios = [make_pc_build_scenario(num_goods, num_bidders, scenario_seed)]
-    else:
-        scenarios = curated_natural_language_scenarios()
-        if names:
-            by_name = {scenario.name: scenario for scenario in scenarios}
-            unknown = sorted(set(names) - set(by_name))
-            if unknown:
-                raise ValueError(
-                    f"Unknown scenario names: {unknown}. "
-                    f"Available: {sorted(by_name)}"
-                )
-            scenarios = [by_name[name] for name in names]
+    """Build the generated PC scenario used by the final implementation."""
+    if names != ["pc_build"]:
+        raise ValueError("The retained runner requires --scenario pc_build")
+    if scenario_spec is None:
+        raise ValueError("The retained runner requires --scenario-spec")
+
+    from auctionlab.instances.structured_spec import make_pc_build_scenario_from_spec
+
+    scenarios = [
+        make_pc_build_scenario_from_spec(
+            scenario_spec,
+            num_goods,
+            num_bidders,
+            seed=scenario_seed,
+            selection_policy=selection_policy,
+        )
+    ]
 
     if seed_type != "all":
         scenarios = [
@@ -2362,7 +2169,7 @@ _PERSON_PROMPT_TYPES = {"value_query", "demand_query", "nl_question"}
 _VERIFIER_PROMPT_TYPES = {"person_answer_semantic_extraction"}
 _PROXY_PROMPT_TYPES = {
     "proxy_nl_gen", "proxy_interest_map", "proxy_provisional_valuations",
-    "proxy_interest_map_complement_entailment", "proxy_late_reflection",
+    "proxy_interest_map_complement_entailment",
 }
 
 
@@ -2453,7 +2260,6 @@ def print_arm_summary(
         "nl_gen": "nl-gen",
         "interest_map": "im",
         "provisional_valuations": "pv",
-        "late_reflection": "late-reflection",
     }
     proxy_calls: dict[str, int] = {}
     proxy_in: dict[str, int] = {}
@@ -2693,8 +2499,6 @@ def main() -> None:
 
     args = parse_args()
 
-    # Apply preset defaults for any flags not explicitly set on the command line
-    _preset_applied = apply_preset(args, _explicitly_set)
     resolve_llm_role_args(args)
     resolve_person_query_mode(args)
     resolve_initial_elicitation_flags(args)
@@ -2842,13 +2646,6 @@ def main() -> None:
     for _deprecation in _deprecations:
         print(f"\n  DEPRECATION: {_deprecation}", flush=True)
 
-    if _preset_applied:
-        print(
-            f"  (preset '{args.preset}' applied defaults for: "
-            + ", ".join(_preset_applied) + ")",
-            flush=True,
-        )
-
     # Config warnings / notes
     for warning in config_warnings(args):
         print(f"\n  {warning}", flush=True)
@@ -2884,8 +2681,6 @@ def main() -> None:
     }
     person_disclosures_path = log_dir / "curated_person_disclosures.csv"
     refinement_path = log_dir / "curated_refinement_records.csv"
-    late_reflection_path = log_dir / "curated_late_reflection_records.csv"
-    late_reflection_candidates_path = log_dir / "curated_late_reflection_candidates.csv"
     pv_candidate_bundle_stats_path = log_dir / "curated_pv_candidate_bundle_stats.csv"
     run_summary_path = log_dir / "curated_run_summary.csv"
     run_config_path = log_dir / "run_config.json"
@@ -2925,37 +2720,6 @@ def main() -> None:
         price_step=args.price_step,
         reserve=args.reserve,
     )
-    late_reflection_config = LateReflectionConfig(
-        enabled=args.late_reflection,
-        scope=args.late_reflection_scope,
-        followup=args.late_reflection_followup,
-        followups_per_bidder=args.late_reflection_followups_per_bidder,
-        near_clearing_threshold=args.late_reflection_near_clearing_threshold,
-        recent_window_rounds=args.late_reflection_recent_window_rounds,
-        max_tokens=args.late_reflection_max_tokens,
-        late_reflection_max_bidders=args.late_reflection_max_bidders,
-    )
-    # A separate client (not the shared VQ/DQ one) so the late-reflection
-    # question-generation call gets its own, larger max_tokens budget --
-    # see --late-reflection-max-tokens.
-    late_reflection_client = (
-        make_live_client(
-            model=args.proxy_model,
-            provider=args.proxy_provider,
-            base_url=args.proxy_base_url,
-            api_key=args.proxy_api_key,
-            temperature=args.proxy_temperature,
-            max_tokens=args.late_reflection_max_tokens,
-            timeout=args.timeout,
-            cache=llm_cache,
-            cache_mode=args.llm_cache_mode,
-            cache_stats=llm_cache_stats,
-            llm_role="proxy",
-        )
-        if args.late_reflection
-        else None
-    )
-
     sealed_rows = []
     clock_rows_by_top_k = {top_k: [] for top_k in args.top_k}
     sealed_proxy_rows = []
@@ -2966,8 +2730,6 @@ def main() -> None:
     clock_event_rows_by_top_k = {top_k: [] for top_k in args.top_k}
     _summary: list[dict] = []
     all_refinement_rows: list[dict] = []
-    all_late_reflection_rows: list[dict] = []
-    all_late_reflection_candidate_rows: list[dict] = []
     all_trajectory_rows: list[dict] = []
     all_pv_candidate_bundle_stats_rows: list[dict] = []
     all_person_disclosure_rows: list[dict] = []
@@ -3370,35 +3132,10 @@ def main() -> None:
                         refinement_strategy=args.refinement_strategy,
                     )
 
-            if args.proxy_type == "llm":
-                result_proxies = {
-                    bidder_id: get_llm_adapter(bidder_id)
-                    for bidder_id in persons
-                }
-            elif args.proxy_type == "dnf":
-                result_proxies = {
-                    bidder_id: DnfLearningProxy(
-                        bidder_id=bidder_id,
-                        person=person,
-                        items=list(scenario.instance.items),
-                    )
-                    for bidder_id, person in persons.items()
-                }
-            else:
-                result_proxies = {
-                    bidder_id: HybridProxy(
-                        bidder_id=bidder_id,
-                        llm_proxy=get_llm_adapter(bidder_id),
-                        dnf_proxy=DnfLearningProxy(
-                            bidder_id=bidder_id,
-                            person=person,
-                            items=list(scenario.instance.items),
-                        ),
-                        alpha=args.hybrid_alpha,
-                        delta=args.hybrid_delta,
-                    )
-                    for bidder_id, person in persons.items()
-                }
+            result_proxies = {
+                bidder_id: get_llm_adapter(bidder_id)
+                for bidder_id in persons
+            }
 
             if not _nl_sample_shown[0]:
                 _nl_sample_shown[0] = True
@@ -3610,8 +3347,6 @@ def main() -> None:
                         proxies=list(_elicited.values()),
                         config=_sealed_config,
                         logger=logger,
-                        late_reflection_config=late_reflection_config,
-                        late_reflection_client=late_reflection_client,
                         scenario_name=scenario.name,
                     )
                     proxy_sealed_result = _proxy_sealed_trajectory[-1]
@@ -3632,8 +3367,6 @@ def main() -> None:
                         instance=scenario.instance,
                         proxies=list(_elicited.values()),
                         config=_sealed_config,
-                        late_reflection_config=late_reflection_config,
-                        late_reflection_client=late_reflection_client,
                         scenario_name=scenario.name,
                     )
                 proxy_sealed_row = proxy_sealed_result_to_row(
@@ -3652,18 +3385,6 @@ def main() -> None:
                 )
                 _proxy_sealed_stats = logger.stats_since_mark()
                 _ps_arm = _collect_arm_stats(_proxy_sealed_stats)
-                _ps_late_reflection_records = proxy_sealed_result.metadata.get(
-                    "late_reflection_records", []
-                )
-                _ps_late_reflection_candidates = proxy_sealed_result.metadata.get(
-                    "late_reflection_candidates", []
-                )
-                all_late_reflection_rows.extend(
-                    late_reflection_records_to_rows(_ps_late_reflection_records)
-                )
-                all_late_reflection_candidate_rows.extend(
-                    late_reflection_candidates_to_rows(_ps_late_reflection_candidates)
-                )
                 _summary.append({
                     "scenario": scenario.name,
                     "arm": "proxy sealed",
@@ -3687,13 +3408,6 @@ def main() -> None:
                     **_ps_arm,
                     **_amortized_shared(),
                     **_est_gt_tok(_ps_arm),
-                    **late_reflection_summary_fields(
-                        _ps_late_reflection_records,
-                        enabled=late_reflection_config.enabled,
-                        scope=late_reflection_config.scope,
-                        max_bidders=late_reflection_config.late_reflection_max_bidders,
-                        candidates=_ps_late_reflection_candidates,
-                    ),
                 })
                 print_refinement_records(
                     proxy_sealed_result.metadata["refinement_records_by_bidder"],
@@ -3935,8 +3649,6 @@ def main() -> None:
                             num_goods=_scenario_num_goods,
                             num_bidders=_scenario_num_bidders,
                             logger=logger,
-                            late_reflection_config=late_reflection_config,
-                            late_reflection_client=late_reflection_client,
                         )
                         proxy_clock_result = _clock_trajectory.final_result
                         clock_round_rows_by_top_k[top_k].extend(
@@ -4041,8 +3753,6 @@ def main() -> None:
                             proxies=list(_elicited.values()),
                             clock_config=cfg,
                             proxy_config=_clock_proxy_config,
-                            late_reflection_config=late_reflection_config,
-                            late_reflection_client=late_reflection_client,
                             scenario_name=scenario.name,
                         )
                     proxy_clock_row = proxy_clock_result_to_row(
@@ -4064,18 +3774,6 @@ def main() -> None:
                     )
                     _proxy_clock_stats = logger.stats_since_mark()
                     _pc_arm = _collect_arm_stats(_proxy_clock_stats)
-                    _pc_late_reflection_records = proxy_clock_result.metadata.get(
-                        "late_reflection_records", []
-                    )
-                    _pc_late_reflection_candidates = proxy_clock_result.metadata.get(
-                        "late_reflection_candidates", []
-                    )
-                    all_late_reflection_rows.extend(
-                        late_reflection_records_to_rows(_pc_late_reflection_records)
-                    )
-                    all_late_reflection_candidate_rows.extend(
-                        late_reflection_candidates_to_rows(_pc_late_reflection_candidates)
-                    )
                     _summary.append({
                         "scenario": scenario.name,
                         "arm": f"proxy clock k={top_k}",
@@ -4087,13 +3785,6 @@ def main() -> None:
                         **_pc_arm,
                         **_amortized_shared(),
                         **_est_gt_tok(_pc_arm),
-                        **late_reflection_summary_fields(
-                            _pc_late_reflection_records,
-                            enabled=late_reflection_config.enabled,
-                            scope=late_reflection_config.scope,
-                            max_bidders=late_reflection_config.late_reflection_max_bidders,
-                            candidates=_pc_late_reflection_candidates,
-                        ),
                     })
                     print_refinement_records(
                         proxy_clock_result.metadata["refinement_records_by_bidder"],
@@ -4252,15 +3943,6 @@ def main() -> None:
     if all_refinement_rows:
         write_csv(all_refinement_rows, refinement_path)
         print(f"  refinement records CSV  →  {refinement_path}")
-    if all_late_reflection_rows:
-        write_csv(all_late_reflection_rows, late_reflection_path)
-        print(f"  late reflection CSV     →  {late_reflection_path}")
-    if all_late_reflection_candidate_rows:
-        write_csv(all_late_reflection_candidate_rows, late_reflection_candidates_path)
-        print(
-            f"  late reflection candidates CSV →  "
-            f"{late_reflection_candidates_path}"
-        )
     print(f"  run config JSON         →  {run_config_path}")
     print(f"  logs                    →  {log_path}")
 

@@ -68,11 +68,6 @@ from auctionlab.experiments.runner import (
     run_sealed_vcg_experiment,
 )
 from auctionlab.instances.base import AuctionInstance, bundle_price
-from auctionlab.llm.late_reflection import (
-    LateReflectionCandidateRecord,
-    LateReflectionConfig,
-    LateReflectionRecord,
-)
 from auctionlab.payments.vcg import vcg_witness_count
 from auctionlab.proxies.base import ClockAuctionProxy, clone_xor_bid
 
@@ -1013,8 +1008,6 @@ def run_proxy_clock_trajectory(
     num_goods: int | None = None,
     num_bidders: int | None = None,
     logger: Any | None = None,
-    late_reflection_config: LateReflectionConfig | None = None,
-    late_reflection_client: Any | None = None,
 ) -> ProxyClockTrajectory:
     """Run the proxy clock once, recording full round-by-round diagnostics.
 
@@ -1070,8 +1063,6 @@ def run_proxy_clock_trajectory(
         ),
     )
 
-    late_reflection_records: list[LateReflectionRecord] = []
-    late_reflection_candidates: list[LateReflectionCandidateRecord] = []
     audit_state = _ClockAuditState()
     demand_oracle = _make_demand_oracle(
         proxies_by_bidder=proxies_by_bidder,
@@ -1079,11 +1070,6 @@ def run_proxy_clock_trajectory(
         proxy_config=proxy_config,
         on_bidder_round=recorder.observe,
         instance=instance,
-        late_reflection_config=late_reflection_config,
-        late_reflection_scenario_name=scenario_name,
-        late_reflection_records=late_reflection_records,
-        late_reflection_candidates=late_reflection_candidates,
-        late_reflection_client=late_reflection_client,
         audit_state=audit_state,
     )
 
@@ -1109,8 +1095,6 @@ def run_proxy_clock_trajectory(
         proxy_config=proxy_config,
         state=state,
         initial_bids=initial_bids,
-        late_reflection_records=late_reflection_records,
-        late_reflection_candidates=late_reflection_candidates,
         audit_state=audit_state,
     )
 

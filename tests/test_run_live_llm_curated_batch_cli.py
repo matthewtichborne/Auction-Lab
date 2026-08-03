@@ -17,10 +17,6 @@ import pytest
 from auctionlab.instances.structured_spec import (
     make_pc_build_scenario_from_spec,
 )
-from scripts.validate_single_bidder_elicitation import (
-    provisional_value_accuracy,
-)
-
 _SCRIPT_PATH = (
     Path(__file__).resolve().parent.parent / "examples" / "run_live_llm_curated_batch.py"
 )
@@ -508,47 +504,3 @@ class TestScenarioSelectionPolicy:
     def test_accepts_seed_sensitive_policy(self, monkeypatch, policy):
         args = _parse(["--selection-policy", policy], monkeypatch)
         assert args.selection_policy == policy
-def test_single_bidder_pv_accuracy_reports_welfare_and_scale():
-    truth = {
-        frozenset({"A"}): 10.0,
-        frozenset({"B"}): 20.0,
-        frozenset({"A", "B"}): 30.0,
-    }
-    predicted = {
-        frozenset({"A"}): 9.0,
-        frozenset({"B"}): 50.0,
-        frozenset({"A", "B"}): 25.0,
-    }
-
-    result = provisional_value_accuracy(predicted, truth, top_k=2)
-
-    assert result["predicted_best_bundle"] == ["B"]
-    assert result["single_bidder_welfare_efficiency"] == pytest.approx(2 / 3)
-    assert result["predicted_max_to_true_max_ratio"] == pytest.approx(5 / 3)
-    assert result["candidate_true_top_k_recall"] == pytest.approx(1.0)
-    assert result["candidate_top_k_overlap_count"] == 2
-    assert result["candidate_top_k_tie_aware_hit_rate"] == pytest.approx(1.0)
-    assert "global_true_top_k_recall" not in result
-
-
-def test_single_bidder_pv_accuracy_is_tie_aware_within_candidate_support():
-    truth = {
-        frozenset({"A"}): 10.0,
-        frozenset({"B"}): 10.0,
-        frozenset({"C"}): 10.0,
-        frozenset({"D"}): 1.0,
-        frozenset({"OUTSIDE"}): 100.0,
-    }
-    predicted = {
-        frozenset({"A"}): 8.0,
-        frozenset({"B"}): 7.0,
-        frozenset({"C"}): 9.0,
-        frozenset({"D"}): 20.0,
-    }
-
-    result = provisional_value_accuracy(predicted, truth, top_k=2)
-
-    assert result["candidate_true_top_k_recall"] == pytest.approx(0.0)
-    assert result["candidate_top_k_tie_aware_hit_rate"] == pytest.approx(0.5)
-    assert result["candidate_true_top_tie_set_size"] == 3
-    assert result["candidate_true_top_k_boundary_value"] == 10.0

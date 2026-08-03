@@ -3,15 +3,11 @@ from __future__ import annotations
 import pytest
 
 from auctionlab.experiments.llm_runner import (
-    make_dnf_learning_proxies_for_instance,
-    make_hybrid_proxies_for_instance,
     make_llm_proxies_for_instance,
     run_sealed_llm_proxy_experiment,
 )
 from auctionlab.instances.base import AuctionInstance
 from auctionlab.llm.clients import MockLlmClient
-from auctionlab.proxies.baselines.dnf_learning import DnfLearningProxy
-from auctionlab.proxies.baselines.hybrid import HybridProxy
 
 
 @pytest.fixture
@@ -284,59 +280,3 @@ def test_make_llm_proxies_for_instance_validates_missing_inputs(
             },
             clients=clients,
         )
-
-
-def test_make_dnf_learning_proxies_for_instance_creates_one_proxy_per_bidder(
-    two_bidder_instance,
-):
-    clients = {
-        "i1": MockLlmClient([]),
-        "i2": MockLlmClient([]),
-    }
-
-    proxies = make_dnf_learning_proxies_for_instance(
-        instance=two_bidder_instance,
-        scenario_description="A two-item auction.",
-        person_seeds={
-            "i1": "Strongly prefers A.",
-            "i2": "Strongly prefers B.",
-        },
-        item_descriptions={"A": "Item A", "B": "Item B"},
-        clients=clients,
-    )
-
-    assert list(proxies) == ["i1", "i2"]
-    assert all(isinstance(proxy, DnfLearningProxy) for proxy in proxies.values())
-    assert proxies["i1"].bidder_id == "i1"
-    assert proxies["i1"].items == ["A", "B"]
-
-
-def test_make_hybrid_proxies_for_instance_creates_one_proxy_per_bidder(
-    two_bidder_instance,
-):
-    clients = {
-        "i1": MockLlmClient([]),
-        "i2": MockLlmClient([]),
-    }
-
-    proxies = make_hybrid_proxies_for_instance(
-        instance=two_bidder_instance,
-        scenario_description="A two-item auction.",
-        person_seeds={
-            "i1": "Strongly prefers A.",
-            "i2": "Strongly prefers B.",
-        },
-        item_descriptions={"A": "Item A", "B": "Item B"},
-        clients=clients,
-        candidate_bundles=[frozenset({"A"}), frozenset({"B"})],
-        alpha=3,
-        delta=0.9,
-    )
-
-    assert list(proxies) == ["i1", "i2"]
-    assert all(isinstance(proxy, HybridProxy) for proxy in proxies.values())
-    assert proxies["i1"].bidder_id == "i1"
-    assert proxies["i1"].alpha == 3
-    assert proxies["i1"].delta == 0.9
-    # Both delegates share the same person/client per bidder.
-    assert proxies["i1"].llm_proxy.proxy.person is proxies["i1"].dnf_proxy.person

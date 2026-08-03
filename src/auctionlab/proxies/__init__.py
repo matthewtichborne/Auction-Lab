@@ -20,17 +20,7 @@ Top-level modules in this package
 - :mod:`~auctionlab.proxies.elicitation` — elicitation helpers and
   :func:`~auctionlab.proxies.elicitation.replay_elicitation`.
 - :mod:`~auctionlab.proxies.full_info` — full-information benchmark proxy
-  (:class:`~auctionlab.proxies.full_info.FullInfoAuctionProxy`).
-
-Baselines sub-package
----------------------
-:mod:`auctionlab.proxies.baselines` contains diagnostic proxies used for
-literature comparison and ablations:
-
-- :class:`~auctionlab.proxies.baselines.dnf_learning.DnfLearningProxy`
-  (ωxor) — proper-learning baseline without LLM inference.
-- :class:`~auctionlab.proxies.baselines.hybrid.HybridProxy`
-  (ωh) — LLM inference for early refinements, then DNF learning.
+  used by evaluation and fast mechanism tests.
 """
 
 from __future__ import annotations

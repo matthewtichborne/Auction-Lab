@@ -1,4 +1,4 @@
-"""Tests for auctionlab.experiments.run_config: presets, warnings, header
+"""Tests for auctionlab.experiments.run_config: policies, warnings, header
 formatting, and refinement-record CSV helpers.
 
 Also covers:
@@ -15,8 +15,6 @@ from unittest.mock import patch
 import pytest
 
 from auctionlab.experiments.run_config import (
-    PRESETS,
-    apply_preset,
     build_run_config_document,
     config_warnings,
     explicitly_set_args,
@@ -36,7 +34,6 @@ from auctionlab.solvers.wdp_ilp import WdpResult
 def _make_args(**kwargs) -> argparse.Namespace:
     """Build a minimal args namespace with sensible defaults."""
     defaults = dict(
-        preset=None,
         provider="ollama",
         model="llama3.1:8b",
         scenario=["pc_build"],
@@ -168,40 +165,6 @@ class TestEventPolicy:
         with pytest.raises(ValueError, match="fixed specification"):
             resolve_event_policy(args, {"event_scarcity_fallbacks"})
 
-    def test_final_v1_freezes_sealed_and_uses_targeted_clock(self):
-        args = _make_args(event_policy="final-v1")
-        resolved = resolve_event_policy(args)
-
-        assert resolved["sealed"]["feedback_rule"] == "competitive"
-        assert resolved["sealed"]["scarcity_fallbacks"] is True
-        assert resolved["sealed"]["large_correction_followup"] is True
-        assert resolved["clock"]["framework"] == "targeted_v1"
-        assert resolved["clock"]["demand_switch_verification"] is True
-        assert resolved["clock"]["contested_bundle_refinement"] is True
-        assert resolved["clock"]["terminal_vcg_witness_verification"] is True
-        assert resolved["clock"]["terminal_best_losing_challenger"] is True
-        assert args.clock_top_k_frontier_policy == "off"
-        assert args.clock_allocation_counterfactual_frontier is False
-
-    def test_final_v2_preserves_sealed_and_uses_revealed_single_pass_clock(self):
-        args = _make_args(event_policy="final-v2")
-        resolved = resolve_event_policy(args)
-
-        assert resolved["sealed"]["feedback_rule"] == "competitive"
-        assert resolved["sealed"]["incumbent_verification"] is True
-        assert resolved["sealed"]["scarcity_fallbacks"] is True
-        assert resolved["sealed"]["large_correction_followup"] is True
-        clock = resolved["clock"]
-        assert clock["framework"] == "frontier_v1"
-        assert clock["supplementary_support_policy"] == "all_atoms"
-        assert clock["incumbent_verification"] is False
-        assert clock["allocation_change_audit"] is False
-        assert clock["frontier_vcg_single_pass"] is True
-        assert clock["frontier_vcg_revealed_only"] is True
-        assert clock["frontier_winner_verification"] is False
-        assert clock["frontier_pivotal_challengers"] is False
-        assert clock["frontier_winner_closure"] is False
-        assert clock["frontier_vcg_witness_verification"] is False
 
     def test_final_v3_uses_revealed_winner_sandwich_clock(self):
         args = _make_args(event_policy="final-v3")
@@ -245,66 +208,6 @@ class TestEventPolicy:
             "terminal_regret_audit"
         ] is False
 
-
-# ---------------------------------------------------------------------------
-# B. Preset application
-# ---------------------------------------------------------------------------
-
-class TestPreset:
-    def test_preset_exists(self):
-        assert "structured-6x6-diagnostic" in PRESETS
-
-    def test_preset_contains_expected_keys(self):
-        p = PRESETS["structured-6x6-diagnostic"]
-        for key in (
-            "scenario", "num_goods", "num_bidders", "scenario_seed",
-            "seed_type", "proxy_type",
-            "ask_initial_question", "use_interest_map", "use_provisional_valuations",
-            "top_k", "max_bundle_size", "sealed_elicitation_rounds",
-            "sealed_feedback_rule", "elicited_clock",
-            "max_refinement_queries_per_bidder", "max_rounds",
-        ):
-            assert key in p, f"missing key: {key}"
-
-    def test_preset_sets_6x6_defaults(self):
-        p = PRESETS["structured-6x6-diagnostic"]
-        assert p["num_goods"] == 6
-        assert p["num_bidders"] == 6
-        assert p["scenario"] == ["pc_build"]
-        assert p["sealed_feedback_rule"] == "all_valued_bundles"
-        assert p["sealed_elicitation_rounds"] == 3
-        assert p["max_bundle_size"] == 3
-        assert p["use_provisional_valuations"] is True
-
-    def test_apply_preset_no_preset(self):
-        args = _make_args(preset=None)
-        applied = apply_preset(args, set())
-        assert applied == []
-        assert args.num_goods == 6  # default unchanged
-
-    def test_apply_preset_sets_values(self):
-        args = _make_args(preset="structured-6x6-diagnostic", num_goods=10)
-        # num_goods not in explicitly_set → overwritten by preset
-        applied = apply_preset(args, set())
-        assert "num_goods" in applied
-        assert args.num_goods == 6
-
-    def test_apply_preset_respects_explicit_flags(self):
-        args = _make_args(preset="structured-6x6-diagnostic", num_goods=10)
-        # num_goods was explicitly set on the command line
-        applied = apply_preset(args, {"num_goods"})
-        assert "num_goods" not in applied
-        assert args.num_goods == 10  # user's explicit value preserved
-
-    def test_apply_preset_elicited_clock_set(self):
-        args = _make_args(preset="structured-6x6-diagnostic", elicited_clock=False)
-        apply_preset(args, set())
-        assert args.elicited_clock is True
-
-    def test_apply_preset_elicited_clock_kept_if_explicit(self):
-        args = _make_args(preset="structured-6x6-diagnostic", elicited_clock=False)
-        apply_preset(args, {"elicited_clock"})
-        assert args.elicited_clock is False
 
 
 # ---------------------------------------------------------------------------
@@ -452,12 +355,6 @@ class TestFormatRunConfig:
         combined = "\n".join(lines)
         assert "person query mode" in combined
         assert "deterministic" in combined
-
-    def test_header_shows_preset_name_when_set(self):
-        args = _make_args(preset="structured-6x6-diagnostic")
-        lines = format_run_config(args, self._mock_scenarios())
-        combined = "\n".join(lines)
-        assert "structured-6x6-diagnostic" in combined
 
 
 # ---------------------------------------------------------------------------

@@ -269,3 +269,4 @@ def test_writes_all_analysis_tables(tmp_path: Path) -> None:
         rows = list(csv.DictReader(handle))
     assert rows[0]["full_powerset_count"] == "7"
     assert rows[0]["inferred_candidate_count"] == "2"
+

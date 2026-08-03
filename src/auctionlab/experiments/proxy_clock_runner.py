@@ -39,14 +39,6 @@ from auctionlab.experiments.event_policy import (
 )
 from auctionlab.experiments.runner import MechanismResult
 from auctionlab.instances.base import AuctionInstance, DemandResponse, demand_rank_key
-from auctionlab.llm.late_reflection import (
-    LateReflectionCandidateRecord,
-    LateReflectionConfig,
-    LateReflectionRecord,
-    clock_allocation_relevant_bidders,
-    clock_marginality_scores,
-    run_late_reflection_trigger,
-)
 from auctionlab.proxies.base import (
     ClockAuctionProxy,
     ElicitationEvent,
@@ -606,119 +598,11 @@ def _make_demand_oracle(
     proxy_config: ProxyClockConfig,
     on_bidder_round: OnBidderRound | None = None,
     instance: AuctionInstance | None = None,
-    late_reflection_config: LateReflectionConfig | None = None,
-    late_reflection_scenario_name: str = "",
-    late_reflection_records: list[LateReflectionRecord] | None = None,
-    late_reflection_candidates: list[LateReflectionCandidateRecord] | None = None,
-    late_reflection_client: Any | None = None,
     audit_state: _ClockAuditState | None = None,
 ):
     _printed_rounds: set[int] = set()
-    _lr_enabled = late_reflection_config is not None and late_reflection_config.enabled
-    _lr_bidder_ids = list(proxies_by_bidder)
-    _lr_fired = [False]
-    _lr_round_buffer: dict[str, DemandResponse] = {}
-    _lr_round_prices: dict[Item, float] = {}
-    _lr_event_bidders_by_round: dict[int, set[str]] = {}
-    _lr_events_by_round: dict[int, list[ElicitationEvent]] = {}
-    _lr_contested_goods_by_round: dict[int, set[Item]] = {}
     _round_response_buffer: dict[str, DemandResponse] = {}
     _contested_goods_by_round: dict[int, set[Item]] = {}
-
-    def _lr_finalize_round(round_idx: int) -> None:
-        """Update rolling near-clearing bookkeeping and fire once at threshold.
-
-        Runs once every clock round while ``late_reflection_config.enabled``,
-        after every bidder in the round has reported demand (mirrors how
-        ``run_ascending_clock_with_supplementary`` itself only computes
-        excess demand once every bidder has responded). Firing happens
-        *inside* the demand oracle -- i.e. strictly before the clock engine
-        even checks whether to terminate for this round -- so this can never
-        degrade into a post-termination / end-of-run check.
-        """
-        assert instance is not None and late_reflection_config is not None
-        primary_demands = {
-            bidder_id: (
-                response.primary_bundles
-                or ([response.primary_bundle] if response.primary_bundle else [])
-            )
-            for bidder_id, response in _lr_round_buffer.items()
-        }
-        excess = compute_excess_demand(instance.items, primary_demands)
-        overdemanded_goods = {item for item, v in excess.items() if v > 0}
-        _lr_contested_goods_by_round[round_idx] = overdemanded_goods
-
-        if _lr_fired[0]:
-            return
-
-        total_positive_excess_demand = sum(max(0, v) for v in excess.values())
-        if total_positive_excess_demand > late_reflection_config.near_clearing_threshold:
-            return
-
-        _lr_fired[0] = True
-
-        window_start = max(
-            0, round_idx - late_reflection_config.recent_window_rounds + 1
-        )
-        recent_event_bidders: set[str] = set()
-        recently_contested: set[Item] = set()
-        recent_events_by_bidder: dict[str, list[ElicitationEvent]] = {}
-        for r in range(window_start, round_idx + 1):
-            recent_event_bidders |= _lr_event_bidders_by_round.get(r, set())
-            recently_contested |= _lr_contested_goods_by_round.get(r, set())
-            for event in _lr_events_by_round.get(r, []):
-                recent_events_by_bidder.setdefault(event.bidder_id, []).append(event)
-
-        current_demand_by_bidder = {
-            bidder_id: response.primary_bundle
-            for bidder_id, response in _lr_round_buffer.items()
-        }
-
-        relevant = clock_allocation_relevant_bidders(
-            bidder_ids=_lr_bidder_ids,
-            recent_event_bidders=recent_event_bidders,
-            current_demand_by_bidder=current_demand_by_bidder,
-            recently_contested_goods=recently_contested,
-        )
-
-        marginality_scores = None
-        if late_reflection_config.scope == "allocation_marginal":
-            marginality_scores = clock_marginality_scores(
-                bidder_ids=_lr_bidder_ids,
-                current_demand_by_bidder=current_demand_by_bidder,
-                positive_excess_demand_goods=overdemanded_goods,
-                contested_goods=recently_contested,
-                recent_events_by_bidder=recent_events_by_bidder,
-                old_rule_relevant_bidders=relevant,
-            )
-
-        bids_by_bidder = {
-            bidder_id: proxies_by_bidder[bidder_id].current_bid()
-            for bidder_id in _lr_bidder_ids
-        }
-
-        lr_result = run_late_reflection_trigger(
-            instance=instance,
-            proxies_by_bidder=proxies_by_bidder,
-            bids_by_bidder=bids_by_bidder,
-            config=late_reflection_config,
-            mechanism="clock",
-            round_idx=round_idx,
-            trigger_reason="clock_near_clearing",
-            allocation_relevant_bidders=relevant,
-            marginality_scores=marginality_scores,
-            scenario_name=late_reflection_scenario_name,
-            arm=f"proxy_clock_top_{proxy_config.top_k}",
-            demanded_bundle_by_bidder=current_demand_by_bidder,
-            prices=dict(_lr_round_prices),
-            recent_events_by_bidder=recent_events_by_bidder,
-            contested_goods=recently_contested,
-            client_override=late_reflection_client,
-        )
-        if late_reflection_records is not None:
-            late_reflection_records.extend(lr_result.records)
-        if late_reflection_candidates is not None:
-            late_reflection_candidates.extend(lr_result.candidates)
 
     def demand_oracle(bidder_id: str, prices: dict[Item, float]):
         proxy = proxies_by_bidder[bidder_id]
@@ -1186,17 +1070,6 @@ def _make_demand_oracle(
                 item for item, amount in excess.items() if amount > 0
             }
             _round_response_buffer.clear()
-
-        if _lr_enabled:
-            _lr_round_prices.clear()
-            _lr_round_prices.update(prices)
-            _lr_round_buffer[bidder_id] = response
-            if fired_events:
-                _lr_event_bidders_by_round.setdefault(round_idx, set()).add(bidder_id)
-                _lr_events_by_round.setdefault(round_idx, []).extend(fired_events)
-            if len(_lr_round_buffer) == len(_lr_bidder_ids):
-                _lr_finalize_round(round_idx)
-                _lr_round_buffer.clear()
 
         if on_bidder_round is not None:
             on_bidder_round(
@@ -1818,8 +1691,6 @@ def _build_clock_mechanism_result(
     proxy_config: ProxyClockConfig,
     state: ClockState,
     initial_bids: dict[str, XorBid],
-    late_reflection_records: list[LateReflectionRecord] | None = None,
-    late_reflection_candidates: list[LateReflectionCandidateRecord] | None = None,
     audit_state: _ClockAuditState | None = None,
 ) -> MechanismResult:
     """Finalize a completed clock run into the standard :class:`MechanismResult`.
@@ -2022,8 +1893,6 @@ def _build_clock_mechanism_result(
             ),
             "final_prices": state.prices,
             "clock_history": list(state.history),
-            "late_reflection_records": list(late_reflection_records or []),
-            "late_reflection_candidates": list(late_reflection_candidates or []),
         },
     )
 
@@ -2034,8 +1903,6 @@ def run_proxy_clock_experiment(
     clock_config: ClockConfig,
     proxy_config: ProxyClockConfig,
     *,
-    late_reflection_config: LateReflectionConfig | None = None,
-    late_reflection_client: Any | None = None,
     scenario_name: str = "",
 ) -> MechanismResult:
     """Run the ascending clock + supplementary VCG over proxy demand.
@@ -2048,13 +1915,6 @@ def run_proxy_clock_experiment(
     See :func:`~auctionlab.experiments.proxy_clock_trajectory.run_proxy_clock_trajectory`
     for the full per-round diagnostic trajectory.
 
-    ``late_reflection_config``, if given and ``.enabled``, fires the
-    ``late_reflection`` elicitation event exactly once, inside the demand
-    oracle, the first round where total positive excess demand drops to or
-    below ``late_reflection_config.near_clearing_threshold`` -- i.e. before
-    the clock engine even evaluates whether to terminate for that round,
-    never as a post-run/post-termination step. See
-    :mod:`auctionlab.llm.late_reflection` for scope/follow-up semantics.
     """
     proxies_by_bidder = {proxy.bidder_id: proxy for proxy in proxies}
     validate_bidder_keys(
@@ -2073,19 +1933,12 @@ def run_proxy_clock_experiment(
         for bidder_id in instance.bidder_ids
     }
 
-    late_reflection_records: list[LateReflectionRecord] = []
-    late_reflection_candidates: list[LateReflectionCandidateRecord] = []
     audit_state = _ClockAuditState()
     demand_oracle = _make_demand_oracle(
         proxies_by_bidder=proxies_by_bidder,
         states=states,
         proxy_config=proxy_config,
         instance=instance,
-        late_reflection_config=late_reflection_config,
-        late_reflection_scenario_name=scenario_name,
-        late_reflection_records=late_reflection_records,
-        late_reflection_candidates=late_reflection_candidates,
-        late_reflection_client=late_reflection_client,
         audit_state=audit_state,
     )
 
@@ -2116,7 +1969,5 @@ def run_proxy_clock_experiment(
         proxy_config=proxy_config,
         state=state,
         initial_bids=initial_bids,
-        late_reflection_records=late_reflection_records,
-        late_reflection_candidates=late_reflection_candidates,
         audit_state=audit_state,
     )

@@ -278,9 +278,8 @@ def make_pc_build_scenario_from_spec(
     seed:
         Consulted when ``selection_policy`` is ``"seeded_sample"`` or
         ``"stratified"`` (it seeds which goods/bidders are sampled). All
-        numeric values in the spec are already frozen, so unlike
-        :func:`auctionlab.instances.structured.make_pc_build_scenario`
-        there is no further jitter to reseed — the same spec always
+        numeric values in the spec are already frozen, so there is no
+        further jitter to reseed — the same spec always
         produces the same valuations and person seeds for a given
         selection, regardless of ``seed``, under ``selection_policy="prefix"``.
     selection_policy:

@@ -16,7 +16,6 @@ from auctionlab.instances.scenario_spec import (
 )
 from auctionlab.instances.structured import (
     BidderPreferenceProfile,
-    make_pc_build_scenario,
     render_brief_qualitative_person_seed,
 )
 from auctionlab.instances.structured_spec import (

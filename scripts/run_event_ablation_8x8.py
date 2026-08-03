@@ -26,46 +26,6 @@ class Treatment:
     flags: tuple[str, ...]
 
 
-TREATMENTS = (
-    Treatment("control", ()),
-    Treatment(
-        "without_incumbent_verification",
-        ("--no-event-incumbent-verification",),
-    ),
-    Treatment("pivotal_challengers", ("--event-pivotal-challengers",)),
-    Treatment("scarcity_fallbacks", ("--event-scarcity-fallbacks",)),
-    Treatment(
-        "large_correction_followup",
-        ("--event-large-correction-followup",),
-    ),
-    Treatment(
-        "gated_near_zero_surplus",
-        ("--event-gate-near-zero-surplus",),
-    ),
-    Treatment(
-        "terminal_regret_audit",
-        ("--event-terminal-regret-audit",),
-    ),
-    Treatment(
-        "all_targeted_events",
-        (
-            "--event-pivotal-challengers",
-            "--event-scarcity-fallbacks",
-            "--event-large-correction-followup",
-            "--event-gate-near-zero-surplus",
-            "--event-terminal-regret-audit",
-        ),
-    ),
-)
-
-
-_COUNTERFACTUAL_FLAGS = (
-    "--sealed-feedback-rule", "competitive",
-    "--sealed-loser-challenger-policy", "off",
-    "--clock-top-k-frontier-policy", "allocation_pivotal",
-    "--clock-allocation-counterfactual-frontier",
-)
-
 PRIMARY_TREATMENTS = (
     Treatment(
         "incumbent_only",
@@ -154,212 +114,6 @@ PRIMARY_TREATMENTS = (
 )
 
 
-_CLOCK_TARGETED_CORE_FLAGS = (
-    "--event-policy", "custom",
-    "--clock-event-framework", "targeted_v1",
-    "--clock-event-demand-switch-verification",
-    "--clock-event-terminal-winner-verification",
-    "--event-incumbent-verification",
-    "--no-clock-event-terminal-stability-audit",
-    "--no-clock-event-terminal-best-losing-challenger",
-    "--no-clock-event-large-correction-followup",
-    "--no-event-scarcity-fallbacks",
-    "--no-event-pivotal-challengers",
-    "--no-event-gate-near-zero-surplus",
-    "--no-event-terminal-regret-audit",
-)
-
-CLOCK_TARGETED_TREATMENTS = (
-    Treatment(
-        "clock_core",
-        (*_CLOCK_TARGETED_CORE_FLAGS,
-         "--no-clock-event-contested-bundle-refinement",
-         "--no-clock-event-terminal-vcg-witness-verification"),
-    ),
-    Treatment(
-        "clock_core_contested",
-        (*_CLOCK_TARGETED_CORE_FLAGS,
-         "--clock-event-contested-bundle-refinement",
-         "--no-clock-event-terminal-vcg-witness-verification"),
-    ),
-    Treatment(
-        "clock_core_terminal_vcg",
-        (*_CLOCK_TARGETED_CORE_FLAGS,
-         "--no-clock-event-contested-bundle-refinement",
-         "--clock-event-terminal-vcg-witness-verification",
-         "--clock-event-terminal-best-losing-challenger"),
-    ),
-    Treatment(
-        "clock_targeted_v1",
-        (*_CLOCK_TARGETED_CORE_FLAGS,
-         "--clock-event-contested-bundle-refinement",
-         "--clock-event-terminal-vcg-witness-verification",
-         "--clock-event-terminal-best-losing-challenger"),
-    ),
-)
-
-
-# Query-efficient, mechanism-specific clock ablation.  Every treatment uses
-# the same provisional-value clock and differs only in exact value-query
-# events.  There is deliberately no query budget: query volume is induced by
-# the enabled events, while the clock runner deduplicates bidder/bundle pairs.
-_CLOCK_LEAN_COMMON_FLAGS = (
-    "--event-policy", "custom",
-    "--clock-event-framework", "targeted_v1",
-    "--clock-supplementary-support-policy", "demand_revealed",
-    "--no-clock-event-demand-switch-verification",
-    "--no-clock-event-contested-bundle-refinement",
-    "--no-clock-event-terminal-best-losing-challenger",
-    "--no-clock-event-terminal-stability-audit",
-    "--no-clock-event-large-correction-followup",
-    "--no-event-scarcity-fallbacks",
-    "--no-event-pivotal-challengers",
-    "--no-event-gate-near-zero-surplus",
-    "--no-event-terminal-regret-audit",
-)
-
-CLOCK_LEAN_TREATMENTS = (
-    Treatment(
-        "pv_only",
-        (*_CLOCK_LEAN_COMMON_FLAGS,
-         "--no-event-incumbent-verification",
-         "--no-clock-event-terminal-winner-verification",
-         "--no-clock-event-terminal-vcg-witness-verification"),
-    ),
-    Treatment(
-        "allocation_only",
-        (*_CLOCK_LEAN_COMMON_FLAGS,
-         "--event-incumbent-verification",
-         "--no-clock-event-terminal-winner-verification",
-         "--no-clock-event-terminal-vcg-witness-verification"),
-    ),
-    Treatment(
-        "terminal_winner_only",
-        (*_CLOCK_LEAN_COMMON_FLAGS,
-         "--no-event-incumbent-verification",
-         "--clock-event-terminal-winner-verification",
-         "--no-clock-event-terminal-vcg-witness-verification"),
-    ),
-    Treatment(
-        "terminal_settlement",
-        (*_CLOCK_LEAN_COMMON_FLAGS,
-         "--no-event-incumbent-verification",
-         "--clock-event-terminal-winner-verification",
-         "--clock-event-terminal-vcg-witness-verification"),
-    ),
-    Treatment(
-        "lean_combined",
-        (*_CLOCK_LEAN_COMMON_FLAGS,
-         "--event-incumbent-verification",
-         "--clock-event-terminal-winner-verification",
-         "--clock-event-terminal-vcg-witness-verification"),
-    ),
-)
-
-
-# Restored pre-shared-policy clock framework.  These three events depend only
-# on the ascending price path: approaching dropout, abandoning primary demand,
-# and a close runner-up.  The 2^3 grid estimates their individual and
-# interaction effects without any sealed/WDP-triggered elicitation events.
-_CLOCK_NATIVE_COMMON_FLAGS = (
-    "--event-policy", "custom",
-    "--clock-event-framework", "native_v1",
-    "--clock-supplementary-support-policy", "all_atoms",
-    "--no-event-incumbent-verification",
-    "--clock-top-k-frontier-policy", "off",
-    "--no-clock-allocation-counterfactual-frontier",
-    "--no-clock-event-demand-switch-verification",
-    "--no-clock-event-contested-bundle-refinement",
-    "--no-clock-event-terminal-winner-verification",
-    "--no-clock-event-terminal-vcg-witness-verification",
-    "--no-clock-event-terminal-best-losing-challenger",
-    "--no-clock-event-terminal-stability-audit",
-    "--no-clock-event-large-correction-followup",
-    "--no-event-scarcity-fallbacks",
-    "--no-event-pivotal-challengers",
-    "--no-event-gate-near-zero-surplus",
-    "--no-event-terminal-regret-audit",
-)
-
-
-def _native_treatment(
-    name: str,
-    *,
-    near_zero: bool,
-    demand_changed: bool,
-    near_tie: bool,
-) -> Treatment:
-    def flag(enabled: bool, name: str) -> str:
-        return f"--{'no-' if not enabled else ''}{name}"
-
-    return Treatment(
-        name,
-        (
-            *_CLOCK_NATIVE_COMMON_FLAGS,
-            flag(near_zero, "clock-native-near-zero-surplus"),
-            flag(demand_changed, "clock-native-demand-changed"),
-            flag(near_tie, "clock-native-near-tie"),
-        ),
-    )
-
-
-CLOCK_NATIVE_TREATMENTS = (
-    _native_treatment(
-        "native_pv_only",
-        near_zero=False,
-        demand_changed=False,
-        near_tie=False,
-    ),
-    _native_treatment(
-        "native_near_zero",
-        near_zero=True,
-        demand_changed=False,
-        near_tie=False,
-    ),
-    _native_treatment(
-        "native_demand_changed",
-        near_zero=False,
-        demand_changed=True,
-        near_tie=False,
-    ),
-    _native_treatment(
-        "native_near_tie",
-        near_zero=False,
-        demand_changed=False,
-        near_tie=True,
-    ),
-    _native_treatment(
-        "native_near_zero_changed",
-        near_zero=True,
-        demand_changed=True,
-        near_tie=False,
-    ),
-    _native_treatment(
-        "native_near_zero_tie",
-        near_zero=True,
-        demand_changed=False,
-        near_tie=True,
-    ),
-    _native_treatment(
-        "native_changed_tie",
-        near_zero=False,
-        demand_changed=True,
-        near_tie=True,
-    ),
-    _native_treatment(
-        "native_full",
-        near_zero=True,
-        demand_changed=True,
-        near_tie=True,
-    ),
-)
-
-
-# Two-stage clock-discovered verification.  No exact value query interrupts
-# price discovery.  The complete provisional candidate language remains
-# available to the supplementary WDP, while only top-k bundles revealed along
-# the clock path can become pivotal-challenger queries. Query counts are
-# induced by the terminal frontier, never by a numerical query budget.
 _CLOCK_FRONTIER_COMMON_FLAGS = (
     "--event-policy", "custom",
     "--clock-event-framework", "frontier_v1",
@@ -374,159 +128,6 @@ _CLOCK_FRONTIER_COMMON_FLAGS = (
     "--no-event-pivotal-challengers",
     "--no-event-scarcity-fallbacks",
     "--no-event-terminal-regret-audit",
-)
-
-
-def _frontier_treatment(
-    name: str,
-    *,
-    winners: bool,
-    challengers: bool,
-    closure: bool,
-    vcg: bool,
-) -> Treatment:
-    def flag(enabled: bool, name: str) -> str:
-        return f"--{'no-' if not enabled else ''}{name}"
-
-    return Treatment(name, (
-        *_CLOCK_FRONTIER_COMMON_FLAGS,
-        flag(winners, "clock-frontier-winner-verification"),
-        flag(challengers, "clock-frontier-pivotal-challengers"),
-        flag(closure, "clock-frontier-winner-closure"),
-        flag(vcg, "clock-frontier-vcg-witness-verification"),
-    ))
-
-
-CLOCK_FRONTIER_TREATMENTS = (
-    _frontier_treatment(
-        "frontier_pv_only",
-        winners=False, challengers=False, closure=False, vcg=False,
-    ),
-    _frontier_treatment(
-        "frontier_winners",
-        winners=True, challengers=False, closure=False, vcg=False,
-    ),
-    _frontier_treatment(
-        "frontier_winners_pivotal",
-        winners=True, challengers=True, closure=False, vcg=False,
-    ),
-    _frontier_treatment(
-        "frontier_winners_pivotal_closure",
-        winners=True, challengers=True, closure=True, vcg=False,
-    ),
-    _frontier_treatment(
-        "frontier_winners_pivotal_closure_vcg",
-        winners=True, challengers=True, closure=True, vcg=True,
-    ),
-)
-
-
-def _single_pass_treatment(
-    name: str,
-    *,
-    enabled: bool,
-    winners: bool,
-    revealed_only: bool,
-) -> Treatment:
-    def flag(value: bool, name: str) -> str:
-        return f"--{'no-' if not value else ''}{name}"
-
-    return Treatment(name, (
-        *_CLOCK_FRONTIER_COMMON_FLAGS,
-        flag(winners, "clock-frontier-winner-verification"),
-        flag(enabled, "clock-frontier-pivotal-challengers"),
-        "--no-clock-frontier-winner-closure",
-        "--no-clock-frontier-vcg-witness-verification",
-        flag(enabled, "clock-frontier-vcg-single-pass"),
-        flag(revealed_only, "clock-frontier-vcg-revealed-only"),
-    ))
-
-
-CLOCK_FRONTIER_SINGLE_PASS_TREATMENTS = (
-    _single_pass_treatment(
-        "single_pass_pv_only",
-        enabled=False, winners=False, revealed_only=False,
-    ),
-    _single_pass_treatment(
-        "single_pass_all",
-        enabled=True, winners=False, revealed_only=False,
-    ),
-    _single_pass_treatment(
-        "single_pass_all_winners",
-        enabled=True, winners=True, revealed_only=False,
-    ),
-    _single_pass_treatment(
-        "single_pass_revealed",
-        enabled=True, winners=False, revealed_only=True,
-    ),
-    _single_pass_treatment(
-        "single_pass_revealed_winners",
-        enabled=True, winners=True, revealed_only=True,
-    ),
-)
-
-
-def _revealed_top_k_treatment(name: str, *, top_k: int | None) -> Treatment:
-    enabled = top_k is not None
-
-    def flag(value: bool, option: str) -> str:
-        return f"--{'no-' if not value else ''}{option}"
-
-    return Treatment(name, (
-        *_CLOCK_FRONTIER_COMMON_FLAGS,
-        "--no-clock-frontier-winner-verification",
-        "--no-clock-frontier-pivotal-challengers",
-        "--no-clock-frontier-winner-closure",
-        "--no-clock-frontier-vcg-witness-verification",
-        flag(enabled, "clock-frontier-vcg-single-pass"),
-        flag(enabled, "clock-frontier-vcg-revealed-only"),
-        *(("--top-k", str(top_k)) if top_k is not None else ()),
-    ))
-
-
-CLOCK_REVEALED_TOP_K_TREATMENTS = (
-    _revealed_top_k_treatment("revealed_topk_pv_only", top_k=None),
-    _revealed_top_k_treatment("revealed_topk_3", top_k=3),
-    _revealed_top_k_treatment("revealed_topk_5", top_k=5),
-    _revealed_top_k_treatment("revealed_topk_8", top_k=8),
-)
-
-
-# Confirmatory clock ablation frozen after exploratory policy development.
-# The unrestricted arm is a diagnostic upper bound, not a candidate primary
-# mechanism: it removes only the requirement that a witness was revealed on
-# the top-3 clock demand path.
-CLOCK_FINAL_TREATMENTS = (
-    _single_pass_treatment(
-        "final_pv_only",
-        enabled=False, winners=False, revealed_only=False,
-    ),
-    Treatment(
-        "final_revealed_witness_top3",
-        (
-            *_CLOCK_FRONTIER_COMMON_FLAGS,
-            "--no-clock-frontier-winner-verification",
-            "--no-clock-frontier-pivotal-challengers",
-            "--no-clock-frontier-winner-closure",
-            "--no-clock-frontier-vcg-witness-verification",
-            "--clock-frontier-vcg-single-pass",
-            "--clock-frontier-vcg-revealed-only",
-            "--top-k", "3",
-        ),
-    ),
-    Treatment(
-        "final_unrestricted_witness",
-        (
-            *_CLOCK_FRONTIER_COMMON_FLAGS,
-            "--no-clock-frontier-winner-verification",
-            "--no-clock-frontier-pivotal-challengers",
-            "--no-clock-frontier-winner-closure",
-            "--no-clock-frontier-vcg-witness-verification",
-            "--clock-frontier-vcg-single-pass",
-            "--no-clock-frontier-vcg-revealed-only",
-            "--top-k", "3",
-        ),
-    ),
 )
 
 
@@ -614,22 +215,16 @@ def _args() -> argparse.Namespace:
         type=Path,
         default=Path("outputs/event_ablation_8x8"),
     )
-    parser.add_argument("--seeds", type=int, nargs="+", default=[0, 1, 2])
+    parser.add_argument(
+        "--seeds", type=int, nargs="+", default=[0, 1, 2, 3, 4]
+    )
     parser.add_argument(
         "--treatment-set",
         choices=[
-            "diagnostic",
             "primary",
-            "clock-targeted",
-            "clock-lean",
-            "clock-native",
-            "clock-frontier",
-            "clock-frontier-single-pass",
-            "clock-revealed-topk",
-            "clock-final",
             "clock-focused-closure",
         ],
-        default="diagnostic",
+        default="primary",
         help=(
             "'primary' runs the staged recommended-policy construction and "
             "leave-one-component-out checks used by the final pipeline."
@@ -641,15 +236,7 @@ def _args() -> argparse.Namespace:
         choices=[
             treatment.name
             for treatment in (
-                *TREATMENTS,
                 *PRIMARY_TREATMENTS,
-                *CLOCK_TARGETED_TREATMENTS,
-                *CLOCK_LEAN_TREATMENTS,
-                *CLOCK_NATIVE_TREATMENTS,
-                *CLOCK_FRONTIER_TREATMENTS,
-                *CLOCK_FRONTIER_SINGLE_PASS_TREATMENTS,
-                *CLOCK_REVEALED_TOP_K_TREATMENTS,
-                *CLOCK_FINAL_TREATMENTS,
                 *CLOCK_FOCUSED_CLOSURE_TREATMENTS,
             )
         ],
@@ -657,7 +244,7 @@ def _args() -> argparse.Namespace:
     )
     parser.add_argument("--pv-calibration-config", type=Path, default=None)
     parser.add_argument("--sealed-rounds", type=int, default=20)
-    parser.add_argument("--clock-rounds", type=int, default=50)
+    parser.add_argument("--clock-rounds", type=int, default=500)
     parser.add_argument("--clock-top-k", type=int, default=3)
     parser.add_argument("--price-step", type=float, default=50.0)
     parser.add_argument("--pivotal-gap-threshold", type=float, default=100.0)
@@ -864,15 +451,7 @@ def _plot(summary: list[dict[str, object]], output_dir: Path) -> None:
         fig, axis = plt.subplots(figsize=(11, 5.5))
         mechanisms = sorted({str(row["mechanism"]) for row in summary})
         treatment_catalog = (
-            *TREATMENTS,
             *PRIMARY_TREATMENTS,
-            *CLOCK_TARGETED_TREATMENTS,
-            *CLOCK_LEAN_TREATMENTS,
-            *CLOCK_NATIVE_TREATMENTS,
-            *CLOCK_FRONTIER_TREATMENTS,
-            *CLOCK_FRONTIER_SINGLE_PASS_TREATMENTS,
-            *CLOCK_REVEALED_TOP_K_TREATMENTS,
-            *CLOCK_FINAL_TREATMENTS,
             *CLOCK_FOCUSED_CLOSURE_TREATMENTS,
         )
         treatments = [
@@ -916,15 +495,7 @@ def _plot(summary: list[dict[str, object]], output_dir: Path) -> None:
 def main() -> None:
     args = _args()
     treatment_pool = {
-        "diagnostic": TREATMENTS,
         "primary": PRIMARY_TREATMENTS,
-        "clock-targeted": CLOCK_TARGETED_TREATMENTS,
-        "clock-lean": CLOCK_LEAN_TREATMENTS,
-        "clock-native": CLOCK_NATIVE_TREATMENTS,
-        "clock-frontier": CLOCK_FRONTIER_TREATMENTS,
-        "clock-frontier-single-pass": CLOCK_FRONTIER_SINGLE_PASS_TREATMENTS,
-        "clock-revealed-topk": CLOCK_REVEALED_TOP_K_TREATMENTS,
-        "clock-final": CLOCK_FINAL_TREATMENTS,
         "clock-focused-closure": CLOCK_FOCUSED_CLOSURE_TREATMENTS,
     }[args.treatment_set]
     requested_treatments = (
@@ -937,13 +508,7 @@ def main() -> None:
         for treatment in treatment_pool
         if treatment.name in requested_treatments
     }
-    if args.treatment_set in {
-        "clock-targeted", "clock-lean", "clock-native", "clock-frontier",
-        "clock-frontier-single-pass",
-        "clock-revealed-topk",
-        "clock-final",
-        "clock-focused-closure",
-    }:
+    if args.treatment_set == "clock-focused-closure":
         args.sealed_rounds = 0
     unknown_for_set = sorted(set(requested_treatments) - set(selected))
     if unknown_for_set:
@@ -990,10 +555,16 @@ def main() -> None:
                 "--skip-baselines",
                 "--sealed-elicitation-rounds", str(args.sealed_rounds),
                 "--sealed-stopping-rule", "no_new_refinements",
-                "--elicited-clock",
-                "--top-k", str(args.clock_top_k),
-                "--max-rounds", str(args.clock_rounds),
-                "--price-step", str(args.price_step),
+                *(
+                    [
+                        "--elicited-clock",
+                        "--top-k", str(args.clock_top_k),
+                        "--max-rounds", str(args.clock_rounds),
+                        "--price-step", str(args.price_step),
+                    ]
+                    if args.treatment_set == "clock-focused-closure"
+                    else []
+                ),
                 "--event-pivotal-gap-threshold",
                 str(args.pivotal_gap_threshold),
                 "--event-correction-threshold",
@@ -1006,16 +577,6 @@ def main() -> None:
                         str(args.pv_calibration_config),
                     ]
                     if args.pv_calibration_config is not None
-                    else []
-                ),
-                *(
-                    [
-                        "--sealed-feedback-rule", "competitive",
-                        "--sealed-loser-challenger-policy", "shadow_price",
-                        "--clock-top-k-frontier-policy", "allocation_pivotal",
-                        "--clock-allocation-counterfactual-frontier",
-                    ]
-                    if args.treatment_set == "diagnostic"
                     else []
                 ),
                 *treatment.flags,

@@ -813,3 +813,4 @@ def plot_interest_map_results(
         )
         written.append(path)
     return written
+

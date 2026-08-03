@@ -70,14 +70,6 @@ from auctionlab.experiments.event_policy import (
 )
 from auctionlab.experiments.runner import MechanismResult
 from auctionlab.instances.base import AuctionInstance
-from auctionlab.llm.late_reflection import (
-    LateReflectionCandidateRecord,
-    LateReflectionConfig,
-    LateReflectionRecord,
-    run_late_reflection_trigger,
-    sealed_allocation_relevant_bidders,
-    sealed_marginality_scores,
-)
 from auctionlab.proxies.base import (
     ElicitationEvent,
     RefinementRecord,
@@ -680,8 +672,6 @@ def run_proxy_sealed_vcg_trajectory(
     config: ProxySealedConfig,
     *,
     logger: Any | None = None,
-    late_reflection_config: LateReflectionConfig | None = None,
-    late_reflection_client: Any | None = None,
     scenario_name: str = "",
 ) -> list[MechanismResult]:
     """Run a proxy-mediated sealed XOR VCG experiment, recording every round.
@@ -716,17 +706,6 @@ def run_proxy_sealed_vcg_trajectory(
     toy/scripted proxies in tests), falls back to summing ``ProxyStats``
     fields across bidders.
 
-    ``late_reflection_config``, if given and ``.enabled``, fires the
-    ``late_reflection`` elicitation event exactly once: after the final
-    round's (``round_number == config.elicitation_rounds``) ordinary
-    feedback/refinement events are applied, but before that round's final
-    bids/allocation are recorded -- i.e. using the pre-final round's
-    provisional allocation to decide which bidders are allocation-relevant
-    (see :func:`~auctionlab.llm.late_reflection.sealed_allocation_relevant_bidders`).
-    Requires ``config.elicitation_rounds >= 1``; with 0 rounds there is no
-    pre-final provisional state to trigger from, so late reflection is a
-    no-op. Records are attached to the final round's
-    ``MechanismResult.metadata["late_reflection_records"]``.
     """
     proxies_by_bidder = {proxy.bidder_id: proxy for proxy in proxies}
     validate_bidder_keys(
@@ -883,9 +862,6 @@ def run_proxy_sealed_vcg_trajectory(
         }
         for bidder_id in instance.bidder_ids
     }
-    late_reflection_records: list[LateReflectionRecord] = []
-    late_reflection_candidates: list[LateReflectionCandidateRecord] = []
-    late_reflection_fired = False
     scarcity_queried_bidders: set[str] = set()
     correction_followup_bidders: set[str] = set()
 
@@ -1126,50 +1102,6 @@ def run_proxy_sealed_vcg_trajectory(
                     events.append(terminal_event)
                     no_new_ordinary_refinements = False
                     is_convergence_candidate = False
-        if (
-            (is_max_round or is_convergence_candidate)
-            and late_reflection_config is not None
-            and late_reflection_config.enabled
-            and not late_reflection_fired
-        ):
-            relevant = sealed_allocation_relevant_bidders(events)
-            post_refinement_bids = {
-                bidder_id: proxies_by_bidder[bidder_id].current_bid()
-                for bidder_id in instance.bidder_ids
-            }
-            marginality_scores = None
-            if late_reflection_config.scope == "allocation_marginal":
-                marginality_scores = sealed_marginality_scores(
-                    bidder_ids=instance.bidder_ids,
-                    provisional_allocation=dict(provisional.allocation),
-                    # trajectory currently holds rounds 0..round_number-1 --
-                    # trajectory[-1] is exactly the previous round's final
-                    # (post-refinement) allocation.
-                    previous_allocation=(
-                        trajectory[-1].allocation if trajectory else None
-                    ),
-                    bids_by_bidder=post_refinement_bids,
-                    events=events,
-                )
-            lr_result = run_late_reflection_trigger(
-                instance=instance,
-                proxies_by_bidder=proxies_by_bidder,
-                bids_by_bidder=post_refinement_bids,
-                config=late_reflection_config,
-                mechanism="sealed",
-                round_idx=round_number,
-                trigger_reason="sealed_pre_final_round",
-                allocation_relevant_bidders=relevant,
-                marginality_scores=marginality_scores,
-                scenario_name=scenario_name,
-                arm=f"proxy_sealed_{config.feedback_rule}",
-                allocated_bundle_by_bidder=dict(provisional.allocation),
-                client_override=late_reflection_client,
-            )
-            late_reflection_records.extend(lr_result.records)
-            late_reflection_candidates.extend(lr_result.candidates)
-            late_reflection_fired = True
-
         trajectory.append(_record_round(round_number))
         trajectory[-1].metadata["events_blocked_by_refinement_cap"] = (
             events_blocked_by_refinement_cap
@@ -1203,12 +1135,6 @@ def run_proxy_sealed_vcg_trajectory(
                 if converged
                 else "max_rounds_reached"
             )
-            trajectory[-1].metadata["late_reflection_records"] = (
-                late_reflection_records
-            )
-            trajectory[-1].metadata["late_reflection_candidates"] = (
-                late_reflection_candidates
-            )
         if converged:
             reason = trajectory[-1].metadata["termination_reason"]
             print(
@@ -1237,8 +1163,6 @@ def run_proxy_sealed_vcg_experiment(
     proxies: list[SealedAuctionProxy],
     config: ProxySealedConfig,
     *,
-    late_reflection_config: LateReflectionConfig | None = None,
-    late_reflection_client: Any | None = None,
     scenario_name: str = "",
 ) -> MechanismResult:
     """Run a proxy-mediated sealed XOR VCG experiment, returning the final round.
@@ -1254,7 +1178,5 @@ def run_proxy_sealed_vcg_experiment(
         instance,
         proxies,
         config,
-        late_reflection_config=late_reflection_config,
-        late_reflection_client=late_reflection_client,
         scenario_name=scenario_name,
     )[-1]

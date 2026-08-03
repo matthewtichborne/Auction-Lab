@@ -1,4 +1,4 @@
-"""Run configuration helpers: presets, validation warnings, header formatting,
+"""Run configuration helpers: policies, validation warnings, header formatting,
 and refinement-record CSV conversion.
 
 Extracted from ``examples/run_live_llm_curated_batch.py`` so the logic is
@@ -18,44 +18,11 @@ from auctionlab.payments.vcg import vcg_witness_count
 if TYPE_CHECKING:
     from auctionlab.llm.logging import CallTypeStats as _CallTypeStats
 
-# ---------------------------------------------------------------------------
-# Presets
-# ---------------------------------------------------------------------------
-
-_PRESET_STRUCTURED_6X6_DIAGNOSTIC: dict[str, Any] = {
-    "scenario": ["pc_build"],
-    "num_goods": 6,
-    "num_bidders": 6,
-    "scenario_seed": 0,
-    "seed_type": "structured",
-    "proxy_type": "llm",
-    "ask_initial_question": True,
-    "use_interest_map": True,
-    "use_provisional_valuations": True,
-    "top_k": [1],
-    "max_bundle_size": 3,
-    "sealed_elicitation_rounds": 3,
-    # all_valued_bundles queries every positive-value atom (highest first),
-    # which surfaces large complement-group bundles that 'competitive' misses
-    # when PV underestimates synergy and displacement cost turns negative.
-    "sealed_feedback_rule": "all_valued_bundles",
-    "elicited_clock": True,
-    "max_refinement_queries_per_bidder": 3,
-    "max_rounds": 30,      # extra rounds help catch near-tie routing decisions
-    "clock_tie_threshold": 50.0,  # tighter tie detection for bundle routing
-}
-
-PRESETS: dict[str, dict[str, Any]] = {
-    "structured-6x6-diagnostic": _PRESET_STRUCTURED_6X6_DIAGNOSTIC,
-}
-
-EVENT_POLICIES = (
-    "custom", "recommended", "final-v1", "final-v2", "final-v3"
-)
+EVENT_POLICIES = ("custom", "recommended", "final-v3")
 
 # Frozen after the five-seed 8x8 ablation.  Keep this mapping explicit rather
 # than reconstructing it from CLI defaults: it is part of the experimental
-# treatment, not merely a convenience preset.
+# treatment, not merely a convenience configuration.
 SEALED_EVENT_POLICY_V1: dict[str, Any] = {
     "feedback_rule": "competitive",
     "loser_challenger_policy": "off",
@@ -64,21 +31,6 @@ SEALED_EVENT_POLICY_V1: dict[str, Any] = {
     "scarcity_fallbacks": True,
     "large_correction_followup": True,
     "terminal_regret_audit": False,
-}
-
-# Clock-specific successor to the shared diagnostic policy.  It suppresses
-# generic near-zero/near-tie refinement and instead verifies demand switches,
-# contested alternatives, final winners, winner-removal VCG witnesses, and a
-# single best losing challenger.
-CLOCK_EVENT_POLICY_TARGETED_V1: dict[str, Any] = {
-    "framework": "targeted_v1",
-    "incumbent_verification": True,
-    "demand_switch_verification": True,
-    "contested_bundle_refinement": True,
-    "terminal_winner_verification": True,
-    "terminal_vcg_witness_verification": True,
-    "terminal_best_losing_challenger": True,
-    "terminal_stability_audit": False,
 }
 
 # Frozen after the final five-seed clock ablation. Price discovery runs to
@@ -177,23 +129,6 @@ def explicitly_set_args() -> set[str]:
     return result
 
 
-def apply_preset(args: Any, explicitly_set: set[str]) -> list[str]:
-    """Mutate ``args`` in-place with preset defaults for flags not in ``explicitly_set``.
-
-    Returns the list of keys that were applied (for logging purposes).
-    """
-    preset_name: str | None = getattr(args, "preset", None)
-    if not preset_name:
-        return []
-    preset = PRESETS.get(preset_name, {})
-    applied: list[str] = []
-    for key, value in preset.items():
-        if key not in explicitly_set:
-            setattr(args, key, value)
-            applied.append(key)
-    return applied
-
-
 def resolve_event_policy(
     args: Any,
     explicitly_set: set[str] | None = None,
@@ -214,7 +149,7 @@ def resolve_event_policy(
             f"event_policy must be one of {EVENT_POLICIES}, got {policy!r}"
         )
 
-    if policy in {"recommended", "final-v1", "final-v2", "final-v3"}:
+    if policy in {"recommended", "final-v3"}:
         conflicts = sorted(explicitly_set & _RECOMMENDED_POLICY_CONFLICTS)
         if conflicts:
             rendered = ", ".join(
@@ -246,27 +181,8 @@ def resolve_event_policy(
             args.clock_event_terminal_winner_verification = True
             args.clock_event_terminal_vcg_witness_verification = True
             args.clock_event_terminal_best_losing_challenger = False
-        elif policy == "final-v1":
-            args.clock_event_framework = "targeted_v1"
-            args.clock_top_k_frontier_policy = "off"
-            args.clock_allocation_counterfactual_frontier = False
-            # The sealed policy retains scarcity fallbacks; the targeted clock
-            # reads its own mechanism-specific switches below.
-            args.event_scarcity_fallbacks = True
-            args.clock_event_demand_switch_verification = True
-            args.clock_event_contested_bundle_refinement = True
-            args.clock_event_terminal_winner_verification = True
-            args.clock_event_terminal_vcg_witness_verification = True
-            args.clock_event_terminal_best_losing_challenger = True
-            args.clock_event_terminal_stability_audit = (
-                CLOCK_EVENT_POLICY_TARGETED_V1["terminal_stability_audit"]
-            )
         else:
-            clock = (
-                CLOCK_EVENT_POLICY_SANDWICH_V3
-                if policy == "final-v3"
-                else CLOCK_EVENT_POLICY_FRONTIER_V2
-            )
+            clock = CLOCK_EVENT_POLICY_SANDWICH_V3
             args.clock_event_framework = clock["framework"]
             args.clock_supplementary_support_policy = clock[
                 "supplementary_support_policy"
@@ -464,10 +380,7 @@ def resolve_event_policy(
             ),
         },
     }
-    if policy == "final-v2":
-        # Do not infer clock settings from shared sealed switches.
-        resolved["clock"].update(CLOCK_EVENT_POLICY_FRONTIER_V2)
-    elif policy == "final-v3":
+    if policy == "final-v3":
         resolved["clock"].update(CLOCK_EVENT_POLICY_SANDWICH_V3)
     args.resolved_event_policy = resolved
     return resolved
@@ -587,21 +500,6 @@ def config_warnings(args: Any) -> list[str]:
             "Refinement budget is bounded only by elicitation-event logic."
         )
 
-    late_reflection = getattr(args, "late_reflection", False)
-    if late_reflection and sealed_rounds == 0 and not elicited_clock:
-        warnings.append(
-            "WARNING: --late-reflection is enabled but neither "
-            "--sealed-elicitation-rounds > 0 nor --elicited-clock is set; "
-            "late reflection has no trigger point and will be a no-op."
-        )
-    elif late_reflection and sealed_rounds == 0:
-        warnings.append(
-            "NOTE: --late-reflection is enabled but "
-            "--sealed-elicitation-rounds is 0; the sealed late_reflection "
-            "trigger requires at least 1 round and will be a no-op for the "
-            "proxy sealed arm (the clock arm is unaffected)."
-        )
-
     return warnings
 
 
@@ -649,10 +547,6 @@ def format_run_config(
         event_policy = resolve_event_policy(args)
     lines: list[str] = [_WIDE, "  auctionlab  ·  run configuration", _WIDE]
 
-    preset_name: str | None = getattr(args, "preset", None)
-    if preset_name:
-        lines.append(f"  preset                    {preset_name}")
-
     provider = getattr(args, "provider", "?")
     model = getattr(args, "model", "?")
     person_provider = getattr(args, "person_provider", None) or provider
@@ -698,8 +592,6 @@ def format_run_config(
     lines.append("")
 
     # Proxy construction
-    proxy_type = getattr(args, "proxy_type", "llm")
-    lines.append(f"  proxy_type                {proxy_type}")
     ask_iq = getattr(args, "ask_initial_question", False)
     use_im = getattr(args, "use_interest_map", False)
     use_pv = getattr(args, "use_provisional_valuations", False)
@@ -840,23 +732,6 @@ def format_run_config(
         )
     else:
         lines.append("    proxy clock             disabled")
-
-    late_reflection = getattr(args, "late_reflection", False)
-    if late_reflection:
-        lr_scope = getattr(args, "late_reflection_scope", "allocation_relevant")
-        lr_followup = getattr(args, "late_reflection_followup", "mechanism_default")
-        lr_per_bidder = getattr(args, "late_reflection_followups_per_bidder", 1)
-        lr_threshold = getattr(args, "late_reflection_near_clearing_threshold", 2)
-        lr_window = getattr(args, "late_reflection_recent_window_rounds", 3)
-        lines.append(
-            f"    late_reflection         enabled"
-            f"  scope={lr_scope}  followup={lr_followup}"
-            f"  followups_per_bidder={lr_per_bidder}"
-            f"  near_clearing_threshold={lr_threshold}"
-            f"  recent_window_rounds={lr_window}"
-        )
-    else:
-        lines.append("    late_reflection         disabled")
 
     lines.append("")
     lines.append(f"  output                    {getattr(args, 'log_dir', '—')}")
@@ -1070,288 +945,6 @@ def refinement_records_to_rows(
 
 # ---------------------------------------------------------------------------
 # Late-reflection record CSV helpers
-# ---------------------------------------------------------------------------
-
-def _lr_bundle_str(bundle) -> str:
-    if not bundle:
-        return "∅"
-    return "{" + ",".join(sorted(bundle)) + "}"
-
-
-def _lr_allocation_str(allocation: dict | None) -> str:
-    if not allocation:
-        return ""
-    parts = [
-        f"{bidder_id}:[{','.join(sorted(allocation[bidder_id]))}]"
-        for bidder_id in sorted(allocation)
-    ]
-    return ";".join(parts)
-
-
-def _lr_num(value: Any) -> Any:
-    if value is None:
-        return ""
-    if isinstance(value, float):
-        return f"{value:.4f}"
-    return value
-
-
-def late_reflection_records_to_rows(records: list) -> list[dict[str, Any]]:
-    """Flatten :class:`~auctionlab.llm.late_reflection.LateReflectionRecord`
-    objects into ``curated_late_reflection_records.csv`` rows.
-
-    One row per record -- callers already produce one record per
-    (bidder, followup bundle) pair, or one record per bidder when no
-    follow-up fired (see ``run_late_reflection_for_bidder``).
-    """
-    rows: list[dict[str, Any]] = []
-    for rec in records:
-        rows.append({
-            "scenario": rec.scenario,
-            "mechanism": rec.mechanism,
-            "arm": rec.arm,
-            "round": "" if rec.round_idx is None else rec.round_idx,
-            "bidder_id": rec.bidder_id,
-            "trigger_reason": rec.trigger_reason,
-            "scope_rule": rec.scope_rule,
-            "allocation_relevant_reason": rec.allocation_relevant_reason,
-            "marginality_score": _lr_num(rec.marginality_score),
-            "marginality_rank": (
-                "" if rec.marginality_rank is None else rec.marginality_rank
-            ),
-            "marginality_selected": (
-                "" if rec.marginality_selected is None else rec.marginality_selected
-            ),
-            "marginality_reasons": rec.marginality_reasons,
-            "question": rec.question,
-            "person_response": rec.person_response,
-            "parse_success": rec.parse_success,
-            "parse_error_type": rec.parse_error_type,
-            "raw_reflection_response_excerpt": rec.raw_reflection_response_excerpt,
-            "reflection_mode": rec.reflection_mode,
-            "reflection_mode_inferred": (
-                "" if rec.reflection_mode_inferred is None
-                else rec.reflection_mode_inferred
-            ),
-            "target_type": rec.target_type,
-            "primary_bundle": (
-                _lr_bundle_str(rec.primary_bundle)
-                if rec.primary_bundle is not None else ""
-            ),
-            "comparison_bundle": (
-                _lr_bundle_str(rec.comparison_bundle)
-                if rec.comparison_bundle is not None else ""
-            ),
-            "marginal_item": rec.marginal_item or "",
-            "comparison_pair_available": (
-                "" if rec.comparison_pair_available is None
-                else rec.comparison_pair_available
-            ),
-            "target_bundles": "; ".join(
-                _lr_bundle_str(b) for b in rec.target_bundles
-            ),
-            "suggested_followup": rec.suggested_followup,
-            "actual_followup_type": rec.actual_followup_type,
-            "followup_bundle": (
-                _lr_bundle_str(rec.followup_bundle)
-                if rec.followup_bundle is not None
-                else ""
-            ),
-            "followup_bundle_rank": (
-                "" if rec.followup_bundle_rank is None
-                else rec.followup_bundle_rank
-            ),
-            "old_reported_value": _lr_num(rec.old_reported_value),
-            "new_reported_value": _lr_num(rec.new_reported_value),
-            "true_value": _lr_num(rec.true_value),
-            "absolute_correction": _lr_num(rec.absolute_correction),
-            "signed_correction": _lr_num(rec.signed_correction),
-            "old_abs_error": _lr_num(rec.old_abs_error),
-            "new_abs_error": _lr_num(rec.new_abs_error),
-            "old_signed_error": _lr_num(rec.old_signed_error),
-            "new_signed_error": _lr_num(rec.new_signed_error),
-            "pricing_error_improved": (
-                "" if rec.pricing_error_improved is None
-                else rec.pricing_error_improved
-            ),
-            "pair_old_abs_error_sum": _lr_num(rec.pair_old_abs_error_sum),
-            "pair_new_abs_error_sum": _lr_num(rec.pair_new_abs_error_sum),
-            "pair_pricing_error_improved": (
-                "" if rec.pair_pricing_error_improved is None
-                else rec.pair_pricing_error_improved
-            ),
-            "pair_old_signed_error_sum": _lr_num(rec.pair_old_signed_error_sum),
-            "pair_new_signed_error_sum": _lr_num(rec.pair_new_signed_error_sum),
-            "demand_before": (
-                _lr_bundle_str(rec.demand_before)
-                if rec.demand_before is not None else ""
-            ),
-            "demand_after": (
-                _lr_bundle_str(rec.demand_after)
-                if rec.demand_after is not None else ""
-            ),
-            "demand_changed": (
-                "" if rec.demand_changed is None else rec.demand_changed
-            ),
-            "allocation_before": _lr_allocation_str(rec.allocation_before),
-            "allocation_after": _lr_allocation_str(rec.allocation_after),
-            "allocation_changed_after_reflection": (
-                "" if rec.allocation_changed_after_reflection is None
-                else rec.allocation_changed_after_reflection
-            ),
-            "true_welfare_before": _lr_num(rec.true_welfare_before),
-            "true_welfare_after": _lr_num(rec.true_welfare_after),
-            "welfare_delta_after_reflection": _lr_num(
-                rec.welfare_delta_after_reflection
-            ),
-            "reported_welfare_before": _lr_num(rec.reported_welfare_before),
-            "reported_welfare_after": _lr_num(rec.reported_welfare_after),
-            "reported_welfare_delta_after_reflection": _lr_num(
-                rec.reported_welfare_delta_after_reflection
-            ),
-            "revenue_before": _lr_num(rec.revenue_before),
-            "revenue_after": _lr_num(rec.revenue_after),
-            "surplus_before": _lr_num(rec.surplus_before),
-            "surplus_after": _lr_num(rec.surplus_after),
-            "tokens_in": rec.tokens_in,
-            "tokens_out": rec.tokens_out,
-            "cache_hit": "" if rec.cache_hit is None else rec.cache_hit,
-            "error_message": rec.error_message,
-        })
-    return rows
-
-
-def late_reflection_summary_fields(
-    records: list,
-    *,
-    enabled: bool = True,
-    scope: str = "",
-    max_bidders: int | None = None,
-    candidates: list | None = None,
-) -> dict[str, Any]:
-    """Aggregate late-reflection records into the run-summary counter fields.
-
-    Used by ``examples/run_live_llm_curated_batch.py`` to add
-    ``late_reflection_*`` columns to ``curated_run_summary.csv`` for one
-    arm's worth of records (sealed or one clock top_k). ``enabled`` should
-    reflect the arm's ``LateReflectionConfig.enabled`` -- it is not inferred
-    from ``records`` being non-empty, since zero allocation-relevant bidders
-    is a legitimate enabled-but-no-op outcome.
-
-    ``late_reflection_attempted_nl_queries``/``_successful_nl_queries``/
-    ``_parse_failures`` are counted per (scenario, mechanism, arm, round,
-    bidder) trigger -- one bidder gets exactly one reflection attempt per
-    trigger, even though a successful attempt with
-    ``followups_per_bidder > 1`` produces several follow-up rows for that
-    same attempt. This is the distinction the live 10x10 runs needed: with
-    every attempt failing to parse, a nl-query count over only *successful*
-    parses silently read 0 with no way to tell "late reflection never
-    triggered" apart from "it triggered but every row failed to parse" --
-    ``attempted`` makes that visible even when ``successful`` is 0.
-
-    ``scope``/``max_bidders`` are echoed straight from the arm's
-    ``LateReflectionConfig`` (not derived from ``records``) so the run
-    summary shows the configuration even when nothing fired.
-    ``candidates`` (the ``LateReflectionCandidateRecord`` list, only
-    non-empty for ``scope == "allocation_marginal"``) drives
-    ``late_reflection_candidate_bidders``/``_selected_bidders``; omitted
-    when ``None`` (e.g. for ``allocation_relevant``/``all_bidders``, which
-    never produce candidate rows).
-    """
-    attempt_keys = {
-        (r.scenario, r.mechanism, r.arm, r.round_idx, r.bidder_id) for r in records
-    }
-    successful_keys = {
-        (r.scenario, r.mechanism, r.arm, r.round_idx, r.bidder_id)
-        for r in records
-        if r.parse_success
-    }
-    failed_keys = attempt_keys - successful_keys
-    followup_vq = sum(1 for r in records if r.actual_followup_type == "value_query")
-    followup_dq = sum(1 for r in records if r.actual_followup_type == "demand_query")
-    pricing_improvements = sum(
-        1 for r in records if r.pricing_error_improved is True
-    )
-    allocation_changes = len({
-        (r.scenario, r.mechanism, r.arm, r.round_idx)
-        for r in records
-        if r.allocation_changed_after_reflection
-    })
-    welfare_deltas = {
-        (r.scenario, r.mechanism, r.arm, r.round_idx): r.welfare_delta_after_reflection
-        for r in records
-        if r.welfare_delta_after_reflection is not None
-    }
-    result = {
-        "late_reflection_enabled": enabled,
-        "late_reflection_scope": scope,
-        "late_reflection_max_bidders": "" if max_bidders is None else max_bidders,
-        # Kept for backward compatibility with the prior CSV/summary
-        # contract -- equal to the successful-attempt count below.
-        "late_reflection_nl_queries": len(successful_keys),
-        "late_reflection_attempted_nl_queries": len(attempt_keys),
-        "late_reflection_successful_nl_queries": len(successful_keys),
-        "late_reflection_parse_failures": len(failed_keys),
-        "late_reflection_followup_vq": followup_vq,
-        "late_reflection_followup_dq": followup_dq,
-        "late_reflection_total_followups": followup_vq + followup_dq,
-        "late_reflection_pricing_error_improvements": pricing_improvements,
-        "late_reflection_allocation_changes": allocation_changes,
-        "late_reflection_welfare_delta_total": sum(welfare_deltas.values()),
-        "late_reflection_token_in": sum(r.tokens_in for r in records),
-        "late_reflection_token_out": sum(r.tokens_out for r in records),
-    }
-    if candidates is not None:
-        result["late_reflection_candidate_bidders"] = len(candidates)
-        result["late_reflection_selected_bidders"] = sum(
-            1 for c in candidates if c.marginality_selected
-        )
-    return result
-
-
-def late_reflection_candidates_to_rows(candidates: list) -> list[dict[str, Any]]:
-    """Flatten :class:`~auctionlab.llm.late_reflection.LateReflectionCandidateRecord`
-    objects into ``curated_late_reflection_candidates.csv`` rows.
-
-    One row per bidder *considered* under ``scope == "allocation_marginal"``
-    -- selected and non-selected alike -- so a reader can see why only some
-    bidders were queried.
-    """
-    rows: list[dict[str, Any]] = []
-    for cand in candidates:
-        rows.append({
-            "scenario": cand.scenario,
-            "mechanism": cand.mechanism,
-            "arm": cand.arm,
-            "round": "" if cand.round_idx is None else cand.round_idx,
-            "bidder_id": cand.bidder_id,
-            "scope_rule": cand.scope_rule,
-            "marginality_score": _lr_num(cand.marginality_score),
-            "marginality_rank": cand.marginality_rank,
-            "marginality_selected": cand.marginality_selected,
-            "marginality_reasons": cand.marginality_reasons,
-            "current_allocation": (
-                _lr_bundle_str(cand.current_allocation)
-                if cand.current_allocation is not None else ""
-            ),
-            "current_demand": (
-                _lr_bundle_str(cand.current_demand)
-                if cand.current_demand is not None else ""
-            ),
-            "recent_events": cand.recent_events,
-            "best_losing_bundle": (
-                _lr_bundle_str(cand.best_losing_bundle)
-                if cand.best_losing_bundle is not None else ""
-            ),
-            "best_losing_bundle_reported_value": _lr_num(
-                cand.best_losing_bundle_reported_value
-            ),
-        })
-    return rows
-
-
-# ---------------------------------------------------------------------------
-# Token/query accounting helpers (also used in run_live_llm_curated_batch.py)
 # ---------------------------------------------------------------------------
 
 def collect_arm_stats(stats: dict) -> dict:

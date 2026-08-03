@@ -300,12 +300,18 @@ def test_project_pack_rejects_goods_projection():
 
 
 def test_cli_replays_pack_without_initial_llm_calls(tmp_path):
-    from auctionlab.instances.structured import make_pc_build_scenario
+    from auctionlab.instances.structured_spec import make_pc_build_scenario_from_spec
     from auctionlab.llm.interest_map import (
         generate_candidate_bundles_from_interest_map,
     )
 
-    scenario = make_pc_build_scenario(4, 4, seed=0)
+    scenario = make_pc_build_scenario_from_spec(
+        "scenarios/pc_build_v3/pc_build_population_16x16.json",
+        4,
+        4,
+        seed=0,
+        selection_policy="coverage_stratified",
+    )
     entries: dict[str, BidderElicitationData] = {}
     for bidder_id in scenario.instance.bidder_ids:
         interested = [
@@ -363,9 +369,12 @@ def test_cli_replays_pack_without_initial_llm_calls(tmp_path):
             sys.executable,
             "examples/run_live_llm_curated_batch.py",
             "--scenario", "pc_build",
+            "--scenario-spec",
+            "scenarios/pc_build_v3/pc_build_population_16x16.json",
             "--num-goods", "4",
             "--num-bidders", "4",
             "--scenario-seed", "0",
+            "--selection-policy", "coverage_stratified",
             "--seed-type", "structured",
             "--skip-baselines",
             "--sealed-elicitation-rounds", "1",
