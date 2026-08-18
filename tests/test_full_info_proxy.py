@@ -1,3 +1,11 @@
+"""The deterministic full-information proxy.
+
+This proxy answers exact value queries from the hidden table and stands in
+for a person during the frozen experiments. Covers its initial-bid modes,
+that refinement installs the true value and updates query statistics, and
+that query accounting stays consistent.
+"""
+
 from __future__ import annotations
 
 import pytest

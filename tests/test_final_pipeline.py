@@ -1,3 +1,11 @@
+"""The frozen final-experiment specification.
+
+Covers the case grid (the shared 8x8 anchor is emitted once, not three
+times), the content hashes recorded for every frozen input, detection of a
+changed input on reload, and that the replay command carries only the frozen
+primary configuration.
+"""
+
 from __future__ import annotations
 
 from pathlib import Path

@@ -1,3 +1,10 @@
+"""Offline analysis of interest maps and candidate support.
+
+Covers the support-reduction and reliability metrics, aggregation across
+seeds with the shared anchor counted once, and that packs projected from a
+master pack are not double-counted in the totals.
+"""
+
 from __future__ import annotations
 
 import csv

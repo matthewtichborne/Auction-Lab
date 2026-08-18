@@ -1,3 +1,9 @@
+"""A small hand-written instance used by demos and unit tests.
+
+Deliberately tiny and fully enumerable, so expected allocations and payments
+can be reasoned about by hand rather than trusted from a solver.
+"""
+
 from __future__ import annotations
 
 from auctionlab.instances.base import AuctionInstance

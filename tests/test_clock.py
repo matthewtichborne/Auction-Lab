@@ -1,3 +1,11 @@
+"""Ascending clock mechanics and the demand oracle.
+
+Covers supplementary bid bookkeeping (a later report for a bundle replaces an
+earlier one, even downwards), deterministic tie-breaking towards the smaller
+bundle, and that the oracle returns a bidder's full valuation table
+irrespective of the top-k reporting limit.
+"""
+
 from __future__ import annotations
 
 import pytest

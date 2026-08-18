@@ -1,3 +1,10 @@
+"""Clock arm driven by a language-model proxy.
+
+Covers caching of the inferred bid so a round does not re-query the model,
+selection of the highest-surplus bundles at posted prices, and that the
+cached bid is returned in full regardless of the top-k limit.
+"""
+
 from __future__ import annotations
 
 import pytest

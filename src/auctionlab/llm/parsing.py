@@ -1,3 +1,12 @@
+"""Parsing of structured model responses.
+
+Responses are requested as JSON but arrive as text, so extraction scans for
+the first object and decodes incrementally, which tolerates markdown fences
+and surrounding prose. Exactly one repair is attempted, stripping trailing
+commas; anything still unparsed is treated as a failure rather than guessed
+at, since a wrong guess would silently alter the elicitation treatment.
+"""
+
 from __future__ import annotations
 
 import json

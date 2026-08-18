@@ -1,3 +1,10 @@
+"""Winner determination over XOR bids.
+
+Covers the welfare-maximising allocation itself and the second-stage
+tie-break that prefers allocations serving more bidders, including that the
+tie-break never trades away welfare and leaves a unique optimum untouched.
+"""
+
 from __future__ import annotations
 
 from auctionlab.bids.xor import XorAtomicBid, XorBid

@@ -1,3 +1,11 @@
+"""Planning of elicitation-pack preparation.
+
+Covers the projection scheme in which seven goods-specific master packs
+cover the 19-cell grid for a seed, repetition across seeds, and that the
+generated commands carry the required preparation flags while preserving any
+explicit safety override.
+"""
+
 from __future__ import annotations
 
 from pathlib import Path

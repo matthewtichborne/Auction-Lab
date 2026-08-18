@@ -1,3 +1,11 @@
+"""Shared fixtures for the test suite.
+
+Provides the toy instance and its expected allocation, so tests that exercise
+mechanisms can assert against a result worked out by hand rather than one
+produced by the solver under test. Real sleeps are suppressed suite-wide
+because several tests deliberately trigger retried failures.
+"""
+
 from __future__ import annotations
 
 import time

@@ -1,3 +1,10 @@
+"""Adapter joining the proxy to the mechanism interface.
+
+Covers bid submission, caching of the current bid across calls, demand
+responses at posted prices, and that value and demand queries are counted
+separately in the statistics the experiments report.
+"""
+
 from __future__ import annotations
 
 from auctionlab.bids.xor import XorAtomicBid

@@ -50,6 +50,10 @@ richer stateful proxy, but this project does not claim agentic behaviour.
 
 ## Repository map
 
+Every module carries a docstring stating what it is for and any non-obvious
+commitment it makes, so the fastest way to orient is to read the docstrings of
+the directory you land in.
+
 ```text
 src/auctionlab/
   auctions/        sealed and clock mechanism logic
@@ -60,6 +64,12 @@ src/auctionlab/
   payments/        VCG payment calculation and witness diagnostics
   proxies/         common proxy protocol and elicitation events
   solvers/         XOR winner determination
+
+tests/             880 offline tests; no credentials or network required
+scenarios/         the generated 16x16 population and its provenance
+outputs/           experiment artefacts (git-ignored apart from the
+                   analytic package and the final manifest)
+cache/             persistent LLM response cache used during preparation
 
 scripts/
   generate_pc_build_population.py
@@ -77,11 +87,36 @@ scripts/
   run_frozen_final_experiment.py
   analyze_interest_maps.py
   build_final_analytic_package.py
+  build_paper_figures.py
   analyze_generated_environment.py
 
 examples/
   run_live_llm_curated_batch.py   shared single-case execution engine
 ```
+
+## Where to change what
+
+| Concern | File |
+|---|---|
+| Bundle valuation formula (substitutes, complements, saturation, caps) | `src/auctionlab/instances/structured.py` |
+| Population validity and non-triviality checks | `src/auctionlab/instances/population_design.py` |
+| Interest-map inference and grounding rules | `src/auctionlab/llm/interest_map.py` |
+| Candidate support filtering | `src/auctionlab/llm/interest_map.py` (`generate_candidate_bundles_from_interest_map`) |
+| Provisional values and chunking | `src/auctionlab/llm/provisional_valuations.py` |
+| Calibration rule and its fitting | `src/auctionlab/llm/value_calibration.py`, `src/auctionlab/experiments/pv_calibration.py` |
+| Sealed elicitation events | `src/auctionlab/experiments/proxy_sealed_runner.py` |
+| Clock elicitation events and terminal closure | `src/auctionlab/experiments/proxy_clock_runner.py` |
+| Event on/off switches used by the ablations | `src/auctionlab/experiments/event_policy.py` |
+| Winner determination and tie-breaking | `src/auctionlab/solvers/wdp_ilp.py` |
+| VCG payments and bidder-removal witnesses | `src/auctionlab/payments/vcg.py` |
+| Prompt text and output contracts | `src/auctionlab/llm/prompts.py`, `schemas.py` |
+| Response parsing and failure policy | `src/auctionlab/llm/parsing.py` |
+| Frozen specification and hashing | `src/auctionlab/experiments/final_pipeline.py` |
+| Result tables and figures | `scripts/build_final_analytic_package.py`, `scripts/build_paper_figures.py` |
+
+Anything under `experiments/` that changes an event policy alters what the
+mechanisms ask, so a change there invalidates the frozen specification and
+requires a new version rather than an in-place edit.
 
 ## Installation
 
@@ -259,12 +294,16 @@ Rebuild generated-environment tables and the environment figure:
   --output-dir outputs/final/analytic_package_v3
 ```
 
-Compile the paper:
+Two report figures are derived from the tracked tables and written outside
+the frozen package:
 
 ```bash
-latexmk -pdf -interaction=nonstopmode -halt-on-error \
-  revised_current_implementation_paper.tex
+./venv/bin/python scripts/build_paper_figures.py
 ```
+
+The report source is held separately from this repository. Its reproducibility
+appendix lists the commands above as the way to regenerate every table and
+figure it contains.
 
 ## Testing
 

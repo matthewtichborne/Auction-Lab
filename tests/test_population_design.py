@@ -1,3 +1,11 @@
+"""Population design and sample validation.
+
+Covers the committed 16x16 design and the checks a sampled cell must pass:
+every selected good wants at least one bidder, declared structural groups
+survive selection, and category, stratum and exclusion diversity are
+enforced, so no accepted cell is trivially solvable.
+"""
+
 from __future__ import annotations
 
 import json

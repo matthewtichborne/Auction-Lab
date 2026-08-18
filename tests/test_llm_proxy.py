@@ -1,3 +1,11 @@
+"""The bidder proxy and its bid state.
+
+Covers inference of an initial XOR bid from a disclosure, transcript
+recording, replacement of a calibrated provisional value by unscaled ground
+truth on refinement, and the free-disposal invariant: a superset atom may
+never be worth less than a subset it contains.
+"""
+
 from __future__ import annotations
 
 import pytest

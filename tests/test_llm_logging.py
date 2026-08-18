@@ -1,3 +1,10 @@
+"""Call-record logging.
+
+Covers JSONL record writing, parent-directory creation, appending across
+calls, starting a fresh run without inheriting stale records, and
+serialisation of structured Pydantic responses.
+"""
+
 from __future__ import annotations
 
 import json

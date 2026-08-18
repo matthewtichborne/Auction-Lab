@@ -1,3 +1,12 @@
+"""Serialisation and replay of frozen elicitation packs.
+
+Covers round-tripping raw uncalibrated values, model provenance and call
+records; the information boundary, since a pack must never serialise the
+hidden valuation table; rejection of a pack replayed against a different
+environment; and that an imperfect inferred interest map is stored as
+inferred rather than silently corrected against hidden truth.
+"""
+
 from __future__ import annotations
 
 import json

@@ -1,3 +1,11 @@
+"""Prompt construction.
+
+Covers the canonical opening question, which must stay domain-specific and
+free of numeric anchoring; the word limits that scale with catalogue size;
+and the interest-map prompt, which must discipline exclusions and require
+explicit evidence before a substitute group is treated as exclusive.
+"""
+
 from __future__ import annotations
 
 import pytest

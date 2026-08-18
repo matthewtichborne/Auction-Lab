@@ -1,3 +1,10 @@
+"""Parsing of structured model responses.
+
+Covers extraction of a JSON object from plain or fenced text, the single
+trailing-comma repair, and validation of the returned payload, including
+which fields may be omitted and when a queried bundle must be echoed back.
+"""
+
 from __future__ import annotations
 
 import pytest

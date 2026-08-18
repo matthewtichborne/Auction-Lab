@@ -1,3 +1,11 @@
+"""Shared aliases and records used across the auction stack.
+
+An item is a string identifier and a bundle is a frozenset of items, so
+bundles are hashable and usable as dictionary keys. Bundles are rendered
+through ``bundle_label`` rather than by formatting the set directly, because
+set iteration order is not stable and result files must be reproducible.
+"""
+
 from __future__ import annotations
 
 from collections.abc import Mapping

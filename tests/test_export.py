@@ -1,3 +1,10 @@
+"""CSV export helpers.
+
+Covers stable allocation rendering, so that repeated runs produce
+byte-identical rows, and row writing where later rows introduce fields the
+earlier ones lacked.
+"""
+
 from __future__ import annotations
 
 import csv

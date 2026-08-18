@@ -1,3 +1,12 @@
+"""Model client behaviour and retry policy.
+
+Covers the mock client used throughout the suite, which returns queued
+responses and records prompts so tests need no credentials, and the retry
+decorator: transient failures such as rate limits are retried with back-off
+while permanent 4xx errors fail immediately rather than consuming the
+budget.
+"""
+
 from __future__ import annotations
 
 import pytest

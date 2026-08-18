@@ -98,6 +98,10 @@ def _normalise_substitute_groups(
     """Deduplicate groups and resolve conflicting modes conservatively."""
     grouped: dict[tuple[str, ...], list[LlmSubstituteGroup]] = {}
     for group in groups:
+        # Restricted to catalogue items, since a selection may not contain
+        # every member the disclosure named. A group with fewer than two
+        # survivors cannot express exclusivity between anything and is
+        # dropped rather than carried as a degenerate single-item group.
         items = tuple(sorted(set(group.items) & known_items))
         if len(items) < 2:
             continue
@@ -105,6 +109,10 @@ def _normalise_substitute_groups(
 
     result: list[LlmSubstituteGroup] = []
     for items, duplicates in sorted(grouped.items()):
+        # Two reports of the same group that disagree on mode are resolved
+        # to ``unclear`` rather than by majority or first-wins. ``unclear``
+        # does not filter, so an unresolved disagreement leaves the support
+        # intact instead of acting on a claim the evidence does not settle.
         modes = {group.acquisition_mode for group in duplicates}
         mode = next(iter(modes)) if len(modes) == 1 else "unclear"
         if len(modes) > 1:
@@ -283,6 +291,16 @@ def normalise_interest_map(
     )
 
 
+# Grounding cues. A mode claimed by the model is only accepted when the
+# person's own words support it, so these lists decide what counts as
+# evidence rather than what the model asserted.
+#
+# The asymmetry is deliberate. ``choose_one`` is the only mode that deletes
+# bundles, so its cues demand an explicit statement that extra members add
+# nothing. ``can_use_multiple`` is permissive and merely declines to filter,
+# so weaker signals such as resale or redundancy suffice. Mistaking a
+# multi-use group for exclusive removes candidates the oracle may need; the
+# reverse error only leaves the support larger than necessary.
 _CHOOSE_ONE_CUES = (
     "at most one",
     "only one",
@@ -323,6 +341,14 @@ def _grounding_clause(
     answer: str,
     items: Sequence[Item],
 ) -> str | None:
+    """Find one clause naming every item in the group.
+
+    Evidence is required within a single clause rather than anywhere in the
+    answer, because a person may mention exclusivity about one pair and
+    multiplicity about another in the same paragraph. Matching across the
+    whole text would let a cue from one sentence license a filtering
+    decision about an unrelated group.
+    """
     lowered_items = [str(item).lower() for item in items]
     return next(
         (

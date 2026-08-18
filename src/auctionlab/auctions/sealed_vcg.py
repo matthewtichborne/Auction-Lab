@@ -1,3 +1,11 @@
+"""One-shot sealed XOR auction with VCG payments.
+
+Solves winner determination over the reported bids and prices each winner by
+the welfare the remaining bidders forgo. Payments are therefore computed in
+reported space: they equal oracle VCG payments only when the bidder-removal
+optima are themselves supported by accurate reports.
+"""
+
 from __future__ import annotations
 
 from dataclasses import dataclass

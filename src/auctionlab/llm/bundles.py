@@ -1,3 +1,11 @@
+"""Generic candidate bundle enumeration.
+
+Produces bundles in a deterministic order (by size, then lexicographically)
+so that a candidate set is reproducible across runs. This is the
+unconditional enumerator; the interest-map-driven generator that actually
+selects a bidder's support lives in ``interest_map``.
+"""
+
 from __future__ import annotations
 
 from itertools import combinations

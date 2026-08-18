@@ -1,3 +1,9 @@
+"""Generic candidate bundle enumeration.
+
+Covers deterministic ordering, the optional empty bundle, and the guards
+rejecting a non-positive size or a size larger than the item set.
+"""
+
 from __future__ import annotations
 
 import pytest

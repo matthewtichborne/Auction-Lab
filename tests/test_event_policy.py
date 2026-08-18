@@ -1,3 +1,12 @@
+"""Eligibility rules for sealed elicitation events.
+
+Covers the conditions each event family imposes: a good counts as contested
+only when at least two bundles want it, a scarcity fallback must strictly
+reduce contested-good exposure, correction-neighbour selection prefers the
+smallest symmetric difference, and the correction fraction is symmetric and
+bounded so it cannot be inflated by the direction of the error.
+"""
+
 from auctionlab.bids.xor import XorAtomicBid, XorBid
 from auctionlab.experiments.event_policy import (
     best_neighbour_bundle,

@@ -1,3 +1,11 @@
+"""Compact XOR bid representation.
+
+An XOR bid is a set of atomic bundle-value pairs, and a bidder wins at most
+one of them. Because the solver interprets atoms under free disposal, the
+value of an assigned bundle is the largest value among atoms contained in it,
+which is what allows a sparse bid to price bundles it never names.
+"""
+
 from __future__ import annotations
 
 from dataclasses import dataclass

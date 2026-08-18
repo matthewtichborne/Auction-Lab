@@ -1,3 +1,11 @@
+"""Offline aggregation of scalability results.
+
+Covers person-side metrics computed from run summaries, reporting of a
+missing summary rather than silent omission, inclusion of frozen opening-answer
+tokens in the person-side totals, and addition of the shared anchor to each
+scaling series.
+"""
+
 from __future__ import annotations
 
 import csv

@@ -1,3 +1,8 @@
+"""Preparation-time language-model layer: clients, prompts, parsing, inference and frozen packs.
+
+Re-exports the pieces used elsewhere so callers need not import from individual submodules.
+"""
+
 from auctionlab.llm.bundles import bundle_sort_key, generate_candidate_bundles
 from auctionlab.llm.cache import (
     CacheMissError,

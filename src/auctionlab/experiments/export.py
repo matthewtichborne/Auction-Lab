@@ -1,3 +1,12 @@
+"""CSV export helpers for experiment results.
+
+Allocations are rendered by sorting bidders and items so that two runs of the
+same configuration produce byte-identical output, which is what makes the
+frozen replay checkable by comparison. The variable-row writer takes the
+union of all row keys, since later rounds can introduce diagnostic fields the
+earlier ones did not have.
+"""
+
 from __future__ import annotations
 
 import csv

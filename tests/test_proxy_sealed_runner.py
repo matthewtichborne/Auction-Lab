@@ -1,3 +1,11 @@
+"""Iterative sealed elicitation.
+
+Covers reproduction of the one-shot sealed VCG outcome under a static
+configuration, improvement of the allocation once feedback and refinement
+are enabled, unlimited refinement when the per-bidder cap is zero, and
+export of the final bid together with its refinement records.
+"""
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field

@@ -83,7 +83,20 @@ def compare_person_answer_extraction(
     expected_budget_hint: float | None,
     item_descriptions: Mapping[Item, str] | None = None,
 ) -> LlmPersonAnswerVerification:
-    """Compare a blind semantic extraction with hidden qualitative truth."""
+    """Compare a blind semantic extraction with hidden qualitative truth.
+
+    The verifier re-reads the disclosure without sight of the latent profile
+    and states what it believes was disclosed; only then is that compared
+    with the profile. Comparing the profile directly against the answer
+    would let the verifier fill in from the profile what the text never
+    actually said.
+
+    The comparison is qualitative on purpose. It asks whether every
+    positively valued good was mentioned, whether an excluded good was
+    invented, and whether each structural group's mode survived, not whether
+    numbers match. The answer is a disclosure contract, so the check is that
+    it discloses enough, not that it discloses precisely.
+    """
     positive = {
         row.item_id for row in extraction.positive_items
         if row.item_id in available_items
@@ -105,11 +118,18 @@ def compare_person_answer_extraction(
     extracted_groups = {
         tuple(sorted(set(group.items) & available_items)):
         (
+            # An extraction that names a mode without the person having
+            # stated it counts as ``unclear``. Crediting the model's guess
+            # here would let a disclosure pass verification on structure it
+            # never actually communicated.
             group.acquisition_mode
             if group.mode_explicitly_stated
             else "unclear"
         )
         for group in extraction.substitute_groups
+        # A group is only meaningful once two of its members are in this
+        # selection; below that there is no exclusivity to state and its
+        # absence from the answer is not a disclosure failure.
         if len(set(group.items) & available_items) >= 2
     }
     substitute_issues: list[str] = []

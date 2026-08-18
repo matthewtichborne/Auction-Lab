@@ -12,6 +12,12 @@ dependencies = [
     "pydantic>=2.0",
 ]
 
+# The README's install line is `pip install -e '.[dev]'`; pytest lives here
+# rather than in the runtime dependencies because it is only needed to run the
+# offline suite, not to reproduce an experiment.
+[project.optional-dependencies]
+dev = ["pytest>=8.0"]
+
 [tool.setuptools.packages.find]
 where = ["src"]
 

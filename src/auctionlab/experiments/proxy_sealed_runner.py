@@ -120,6 +120,10 @@ class ProxySealedConfig:
     # ``fixed_rounds`` always executes ``elicitation_rounds`` cycles.
     # ``no_new_refinements`` treats that value as a maximum and stops after
     # the first completed cycle that produces no new refinement queries.
+    # Stopping on "no new refinements" rather than "no welfare improvement"
+    # is deliberate: a round can produce corrections that leave welfare
+    # unchanged yet expose the competitor whose correction matters next, so
+    # halting on a flat round would forfeit that.
     stopping_rule: str = "fixed_rounds"
     # Independent loser challengers are optional. Winner-removal
     # counterfactuals still expose losing bidders when they are relevant to a
@@ -132,9 +136,18 @@ class ProxySealedConfig:
     # Independently switchable event-policy factors used by the 8x8 ablation.
     incumbent_verification: bool = True
     pivotal_challengers: bool = False
+    # A challenger is only worth an exact query when it is close to changing
+    # the allocation. The gap is in currency units, so this threshold is
+    # scale-dependent and would need revisiting on a population with
+    # different bundle values.
     pivotal_gap_threshold: float = 100.0
     scarcity_fallbacks: bool = False
     large_correction_followup: bool = False
+    # A correction of at least this fraction is treated as evidence that the
+    # proxy misjudged this region of the bundle space, making a structurally
+    # neighbouring estimate worth checking too. Measured symmetrically, so a
+    # large overestimate triggers the follow-up as readily as an
+    # underestimate.
     correction_followup_threshold: float = 0.25
     terminal_regret_audit: bool = False
 
@@ -205,6 +218,10 @@ def _compute_item_shadow_prices(
         )
         if atom is None:
             continue
+        # Splitting the bundle value evenly is crude, but these prices only
+        # rank candidate challengers; they never enter an allocation or a
+        # payment. Computing a true marginal contribution per item would cost
+        # one extra WDP solve each, which is not worth it for a ranking.
         per_item = atom.value / len(winner_bundle)
         for item in winner_bundle:
             shadow[item] = per_item
@@ -262,6 +279,10 @@ def _forced_allocation_gap(
     )
     if bidder_atom is None:
         return float("inf")
+    # The forced bundle is no longer available, so every atom overlapping it
+    # is infeasible and must be dropped rather than left for the solver to
+    # reject. What remains is the best the other bidders can do around the
+    # forced assignment, which is exactly the counterfactual being priced.
     residual_bids: list[XorBid] = []
     for other_id in instance.bidder_ids:
         if other_id == bidder_id:
@@ -370,6 +391,10 @@ def _scarcity_fallback_events(
             if atom.bundle == bundle
         )
         ranked.append((-value, bidder_id, bundle))
+    # Ranked by reported value, highest first. Only the top two are emitted:
+    # a fallback is speculative, since it asks about a bundle the bidder is
+    # not currently winning, so the budget spent on it is deliberately small
+    # relative to incumbent and counterfactual verification.
     events: list[ElicitationEvent] = []
     for _, bidder_id, bundle in sorted(ranked)[:2]:
         avoided = sorted(
@@ -938,8 +963,10 @@ def run_proxy_sealed_vcg_trajectory(
                 )
                 if event.bidder_id not in scarcity_queried_bidders
             )
-        # A bidder/bundle pair should be queried at most once even when
-        # several independent policy factors identify it in the same round.
+        # Keyed on the bidder/bundle pair rather than the event, because two
+        # policy factors converging on the same question is evidence that the
+        # question matters, not a reason to ask it twice. This keeps the
+        # reported query count a count of distinct information requested.
         deduplicated: list[ElicitationEvent] = []
         seen_event_keys: set[tuple[str, Bundle | None]] = set()
         for event in events:

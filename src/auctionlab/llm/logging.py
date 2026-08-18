@@ -1,3 +1,11 @@
+"""Per-call records and aggregate call statistics.
+
+Every model call is written as a JSONL record so a result can be traced back
+to the exact request that produced it. Statistics are kept separately by call
+type, because preparation-time inference and person-side queries are
+different costs and must not be summed into a single figure.
+"""
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field, fields, is_dataclass

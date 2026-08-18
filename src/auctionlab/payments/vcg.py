@@ -44,7 +44,17 @@ def compute_vcg_payments_with_witnesses(
     *,
     tolerance: float = 1e-6,
 ) -> VcgPaymentResult:
-    """Compute VCG payments and retain every bidder-removal WDP result."""
+    """Compute VCG payments and retain every bidder-removal WDP result.
+
+    Each payment needs one solve of the economy without that bidder, so this
+    costs ``n`` extra winner-determination solves beyond the allocation. The
+    counterfactual results are kept rather than discarded because the
+    allocation each one selects identifies that payment's *witness* bundles,
+    and a payment is only reconstructed correctly when those bundles are
+    themselves accurately valued. Retaining them is what makes the gap
+    between allocation accuracy and payment accuracy measurable rather than
+    merely suspected.
+    """
     if full is None:
         full = solve_wdp_xor_ilp(items, bids)
 
@@ -66,6 +76,11 @@ def compute_vcg_payments_with_witnesses(
         allocated_bundle: Bundle = full.allocation.get(bidder_id, frozenset())
         value_i = bid.value_of(allocated_bundle)
 
+        # The externality this bidder imposes: what the others could have
+        # had without them, less what they actually get alongside them. Both
+        # terms are read from *reported* bids, so this is a reported-space
+        # payment and equals the oracle payment only when the witness bundles
+        # behind ``without_i`` carry accurate values.
         welfare_of_others_in_full = full.welfare - value_i
         raw_payment = without_i.welfare - welfare_of_others_in_full
 

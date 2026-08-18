@@ -1,3 +1,10 @@
+"""Command-line surface of the population generator.
+
+Covers argument parsing for batch regeneration, resumption, provider
+selection, repair passes and budget guards, and that the committed design
+loads as exactly 16 goods by 16 bidders.
+"""
+
 from __future__ import annotations
 
 import json

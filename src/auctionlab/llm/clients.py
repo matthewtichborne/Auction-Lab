@@ -1,3 +1,12 @@
+"""Model provider clients and retry behaviour.
+
+All clients share one interface so an experiment can swap provider without
+touching calling code, and the mock client lets the whole test suite run
+without credentials or network access. Retries use exponential back-off with
+jitter and distinguish transient failures from permanent ones: retrying a
+malformed request would consume budget without any prospect of success.
+"""
+
 from __future__ import annotations
 
 import os

@@ -1,3 +1,10 @@
+"""Scalability grid construction.
+
+Covers the default grid across sizes with one anchor per seed, repetition of
+every case for each seed, rejection of a fixed size outside the grid, and the
+scenario arguments the generated commands supply.
+"""
+
 from __future__ import annotations
 
 import sys

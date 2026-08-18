@@ -82,6 +82,10 @@ class ProxyClockConfig:
 
     top_k: int = 1
     elicited: bool = False
+    # Both thresholds are in currency units and so are scale-dependent: they
+    # decide when two bundles are close enough to count as a near-tie, or a
+    # surplus close enough to zero to be treated as marginal. A population
+    # with different bundle values would need them revisited.
     margin_threshold: float = 100.0
     tie_threshold: float = 100.0
     # Exact-query each previously unseen bundle when it enters the bidder's
@@ -146,6 +150,13 @@ class ProxyClockConfig:
     # ``all_atoms`` preserves the historical implementation. Under
     # ``demand_revealed``, only top-k positive-surplus demands observed along
     # the price path enter the mechanism's supplementary bid language.
+    #
+    # Worth knowing when comparing arms: under ``all_atoms`` the terminal
+    # supplementary WDP ranges over the same atom set the sealed auction
+    # starts from, so a clock policy limited to winner closure reduces to
+    # sealed incumbent verification and the two produce identical results.
+    # The mechanisms only diverge once eligibility is restricted to what the
+    # price path revealed.
     supplementary_support_policy: str = "all_atoms"
 
     def __post_init__(self) -> None:
@@ -294,6 +305,13 @@ def _reported_wdp(
 def _revealed_support_lists(
     audit_state: _ClockAuditState,
 ) -> dict[str, list[XorAtomicBid]]:
+    """Atoms each bidder actually demanded somewhere on the price path.
+
+    This is the restriction that makes the clock cheap. A bundle never
+    demanded at any posted price cannot become a terminal witness, however
+    high its provisional value, so the price path acts as a free relevance
+    filter over the candidate support.
+    """
     return {
         bidder_id: list(atoms.values())
         for bidder_id, atoms in audit_state.revealed_atoms.items()
@@ -330,7 +348,15 @@ def _winner_removal_frontier(
     remove_entire_bidder: bool = False,
     support_atoms: dict[str, list[XorAtomicBid]] | None = None,
 ) -> list[tuple[str, Bundle]]:
-    """Bundles exposed by removing each winner's atom or entire bid."""
+    """Bundles exposed by removing each winner's atom or entire bid.
+
+    The two modes answer different questions. Removing a single atom asks
+    what would win if this bidder could not have *this* bundle, which is the
+    allocation-side counterfactual. Removing the bidder entirely gives the
+    bidder-removal economy that VCG prices against. Only the second yields
+    genuine payment witnesses, which is why the payment-oriented events pass
+    ``remove_entire_bidder=True``.
+    """
     candidates: list[tuple[str, Bundle]] = []
     seen: set[tuple[str, Bundle]] = set()
     for removed_bidder in instance.bidder_ids:

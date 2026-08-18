@@ -927,7 +927,16 @@ def load_observations(
 # ---------------------------------------------------------------------------
 
 def _budget_norm(observation: PvObservation) -> float:
-    """Denominator for budget-normalised error, never zero."""
+    """Denominator for budget-normalised error, never zero.
+
+    Normalising by the disclosed budget rather than by the true value keeps
+    the objective on a scale the calibration is entitled to know: the budget
+    is disclosed, whereas the true value is exactly what is being estimated.
+    It also stops cheap bundles dominating the average, since a small
+    absolute error on a low-value bundle would otherwise look enormous in
+    relative terms. Falling back to the true value only arises when no
+    budget was disclosed.
+    """
     if observation.disclosed_budget and observation.disclosed_budget > 0:
         return float(observation.disclosed_budget)
     return max(observation.true_value, LOG_ERROR_FLOOR)
@@ -1112,7 +1121,14 @@ def predict(
     observation: PvObservation,
     calibration: ValueCalibration,
 ) -> float:
-    """Apply a calibration to one observation exactly as the runtime does."""
+    """Apply a calibration to one observation exactly as the runtime does.
+
+    Routed through ``ValueCalibration.apply`` rather than reimplementing the
+    formula, so that a scale selected here cannot be fitted under slightly
+    different arithmetic from the one the auction will use. In particular the
+    disclosed-budget cap is applied at fitting time too: a scale chosen
+    without it would be tuned against values the mechanism never sees.
+    """
     return calibration.apply(
         observation.raw_value,
         observation.bundle_size,

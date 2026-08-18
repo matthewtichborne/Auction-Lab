@@ -1,3 +1,10 @@
+"""Single-run entry points for the two mechanisms.
+
+Wraps the sealed and clock mechanisms behind a common result record so an
+experiment can execute either arm from the same instance and compare the
+outcomes directly.
+"""
+
 from __future__ import annotations
 
 from dataclasses import dataclass

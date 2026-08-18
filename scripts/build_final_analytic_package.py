@@ -341,15 +341,18 @@ def plot_cross(rows: list[dict[str, Any]], output: Path) -> None:
 
 
 def plot_events(rows: list[dict[str, Any]], output: Path) -> None:
-    fig, axes = plt.subplots(1, 2, figsize=(10.7, 4.4))
+    # Same reduction as the ablation figure: authored wide, printed at
+    # \linewidth, so the fonts are set larger to survive it.
+    fig, axes = plt.subplots(1, 2, figsize=(10.7, 3.9))
     for ax, mechanism in zip(axes, ("Sealed", "Clock")):
         group = [row for row in rows if row["mechanism"] == mechanism]
         labels = [str(row["event_type"]).replace("_", " ") for row in group]
         y = range(len(group))
         ax.barh(list(y), [100 * number(row, "reported_vcg_witness_hit_rate") for row in group], color=COLORS[mechanism], alpha=.85)
         ax.set_yticks(list(y), labels)
-        ax.set_xlabel("Reported VCG-witness hit rate (%)")
-        ax.set_title(f"{mechanism} events")
+        ax.set_xlabel("Reported VCG-witness hit rate (%)", fontsize=12)
+        ax.set_title(f"{mechanism} events", fontsize=12)
+        ax.tick_params(labelsize=11)
         style(ax)
     save(fig, output, "event_usefulness")
 
@@ -390,16 +393,23 @@ def plot_ablation(sealed: list[dict[str, str]], clock: list[dict[str, str]], out
         "focused_revealed_winner_sandwich": "Revealed-winner sandwich",
         "focused_full_frontier_closure": "Full frontier closure",
     }
-    fig, axes = plt.subplots(1, 2, figsize=(10.5, 4.2))
+    # Authored wide but printed at \linewidth (~6.6in), so every font is set
+    # about 1.6x larger than it should look: at the ~0.63 reduction a 7pt
+    # annotation would land at 4.4pt on the page, which is unreadable.
+    fig, axes = plt.subplots(1, 2, figsize=(10.5, 3.7))
+    # Offsets are in points and do not scale with the font, so they are tuned
+    # for the sizes set below. The upper cluster is tight: three treatments sit
+    # within 1.3 points of efficiency of each other, so those labels are thrown
+    # in different directions to keep them apart.
     sealed_offsets = {
-        "incumbent_only": ((5, 5), "left"),
-        "plus_counterfactuals": ((5, 5), "left"),
-        "plus_scarcity": ((5, -14), "left"),
-        "recommended": ((5, 5), "left"),
-        "recommended_without_incumbent": ((5, 5), "left"),
-        "recommended_without_counterfactuals": ((5, 5), "left"),
-        "recommended_without_scarcity": ((-5, 10), "right"),
-        "recommended_without_large_correction": ((5, -15), "left"),
+        "incumbent_only": ((5, 4), "left"),
+        "plus_counterfactuals": ((6, -10), "left"),
+        "plus_scarcity": ((6, -12), "left"),
+        "recommended": ((-6, 6), "right"),
+        "recommended_without_incumbent": ((5, 4), "left"),
+        "recommended_without_counterfactuals": ((-6, 2), "right"),
+        "recommended_without_scarcity": ((-4, 8), "right"),
+        "recommended_without_large_correction": ((6, -12), "left"),
     }
     for ax, mechanism, rows in ((axes[0], "Sealed", [r for r in sealed if r["mechanism"] == "sealed"]), (axes[1], "Clock", clock)):
         point_labels: dict[tuple[float, float], list[tuple[str, str]]] = defaultdict(list)
@@ -424,10 +434,14 @@ def plot_ablation(sealed: list[dict[str, str]], clock: list[dict[str, str]], out
                 point,
                 xytext=offset,
                 textcoords="offset points",
-                fontsize=7,
+                fontsize=11,
                 ha=alignment,
             )
         ax.set(xlabel="Mean value queries", ylabel="Mean efficiency (%)", title=f"{mechanism} policy ablation")
+        ax.tick_params(labelsize=11)
+        ax.xaxis.label.set_size(12)
+        ax.yaxis.label.set_size(12)
+        ax.title.set_size(12)
         style(ax)
     save(fig, output, "event_policy_ablation")
 

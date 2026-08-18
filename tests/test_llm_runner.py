@@ -1,3 +1,10 @@
+"""Assembly of a sealed proxy experiment.
+
+Covers the end-to-end outcome for a small instance, application of the
+provisional-value discount, the option to ignore the epsilon guard, and use
+of bidder-specific candidate sets.
+"""
+
 from __future__ import annotations
 
 import pytest

@@ -1,3 +1,10 @@
+"""The OpenAI-compatible HTTP client.
+
+Covers request construction and response handling, usage accounting
+including reasoning tokens, and the per-model differences in which request
+fields are sent.
+"""
+
 from __future__ import annotations
 
 from types import SimpleNamespace

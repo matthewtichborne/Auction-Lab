@@ -1,3 +1,11 @@
+"""Out-of-domain calibration environments.
+
+Covers construction of the synthetic scenarios used to fit the provisional-value
+scale, and the structural requirements they must satisfy: a dense bidder must
+still exclude something, and both substitute acquisition modes must be
+present, so the fitted scale is not tuned on degenerate cases.
+"""
+
 from __future__ import annotations
 
 import argparse

@@ -1,3 +1,10 @@
+"""Clock parameter tuning.
+
+Covers the scale-free budget-per-good reference, and selection driven by
+payment error among the configurations that stay inside the efficiency
+band.
+"""
+
 from __future__ import annotations
 
 from scripts.tune_clock_parameters_calibration import (

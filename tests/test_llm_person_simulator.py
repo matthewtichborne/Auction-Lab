@@ -1,3 +1,11 @@
+"""The simulated person and its answer contract.
+
+Covers value and demand queries, the prompt context each records, and the
+validation applied to answers: an answer is checked against the latent
+profile before acceptance, and reasoning that mentions items outside the
+queried bundle is tolerated rather than treated as failure.
+"""
+
 from __future__ import annotations
 
 import json

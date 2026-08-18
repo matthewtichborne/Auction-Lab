@@ -1,3 +1,11 @@
+"""Output contracts for structured model responses.
+
+Each schema is the shape a response must satisfy before it is accepted.
+Validation happens here rather than at the call site so that a malformed
+response fails at the boundary, and the fields a model may legitimately omit
+are declared explicitly rather than inferred from whatever arrives.
+"""
+
 from __future__ import annotations
 
 from typing import Annotated, Literal

@@ -1,3 +1,11 @@
+"""Round-level clock trajectory records.
+
+Covers one row per round, cumulative query and atom counts that never
+decrease, agreement between the final row and the run result, and that the
+round cap behaves as a safeguard rather than a termination rule when the
+market never clears.
+"""
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field

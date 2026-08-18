@@ -33,6 +33,14 @@ def _stepped_threshold(
     mapping: dict[str, int | float],
     size: int,
 ) -> int | float:
+    """Look up the threshold that applies at a given auction size.
+
+    Several acceptance rules have to loosen as auctions grow. A four-good
+    cell cannot spread welfare across as many winners as a ten-good cell, so
+    a single constant would either reject valid small cells or wave through
+    concentrated large ones. The mapping is keyed by lower bound and the
+    largest applicable entry wins.
+    """
     eligible = [
         (int(lower_bound), value)
         for lower_bound, value in mapping.items()
@@ -273,7 +281,15 @@ def sample_economic_report(
     *,
     constraints: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """Solve one sampled full-information auction and check non-triviality."""
+    """Solve one sampled full-information auction and check non-triviality.
+
+    Non-triviality is the property that the cell poses a real allocation
+    problem. The binding test is the largest winner's share of optimum
+    welfare: if one bidder takes almost everything, the efficient allocation
+    is findable without any elicitation and the cell would flatter every
+    mechanism equally. Cells failing this are rejected before any run, so
+    the reported efficiencies are earned on contested instances.
+    """
     # Late imports avoid a module cycle: structured_spec uses the structural
     # ordering functions above while constructing scenarios.
     from auctionlab.instances.base import AuctionInstance

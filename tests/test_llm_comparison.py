@@ -1,3 +1,10 @@
+"""Comparison of reported outcomes against full information.
+
+Covers stable string rendering of bids and allocations for the result tables,
+and that reported welfare and true welfare are kept distinct: a sealed run
+must not report hidden welfare as though it had been elicited.
+"""
+
 from __future__ import annotations
 
 import pytest

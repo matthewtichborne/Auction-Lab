@@ -1,3 +1,10 @@
+"""Clock execution and terminal event orchestration.
+
+Covers agreement with the demand oracle under a static configuration, the
+elicited configuration's refinement records, unlimited refinement when the
+per-bidder cap is zero, and the metadata each run reports.
+"""
+
 from __future__ import annotations
 
 import pytest

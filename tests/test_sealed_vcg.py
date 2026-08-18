@@ -1,3 +1,10 @@
+"""One-shot sealed XOR auction with VCG payments.
+
+Checks the allocation, reported welfare and per-bidder payments together, and
+that recording bidder-removal witnesses is free: witness logging must not
+trigger extra winner-determination solves.
+"""
+
 from __future__ import annotations
 
 from auctionlab.auctions.sealed_vcg import run_sealed_xor_vcg
