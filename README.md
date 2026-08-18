@@ -11,10 +11,9 @@ The retained empirical implementation covers two mechanisms:
 - an ascending item-price clock with supplementary XOR bids and terminal
   revealed-witness verification.
 
-The repository is intentionally scoped to the final PC-build experiment. Old
-hand-written scenarios, random batch experiments, alternative learned proxy
-types, late reflection, smoke runners, and superseded event frameworks have
-been removed.
+Across 95 matched cases, the sealed and ascending-clock mechanisms recovered 94.8% and 92.8% of full-information welfare while requiring an average of 21.8 and 12.3 selective value queries per auction. The repository includes case-level results, seed-clustered uncertainty intervals, ablation studies and an 880-test offline suite.
+
+The repository is intentionally scoped to the final PC-build experiment. 
 
 ## Final architecture
 
@@ -198,7 +197,8 @@ Offline validation is also available:
 
 ```bash
 ./venv/bin/python scripts/validate_pc_build_population.py \
-  --spec scenarios/pc_build_v3/pc_build_population_16x16.json
+  --scenario-spec scenarios/pc_build_v3/pc_build_population_16x16.json \
+  --report outputs/reproduction/population_validation.json
 ```
 
 ## Frozen elicitation packs
@@ -318,8 +318,4 @@ hash verification.
 
 ## Generated data policy
 
-Bulk raw auction results and frozen elicitation packs are ignored by Git.
-The repository tracks the compact final analytic package, final experiment
-manifest, generated population, generation provenance, paper source, and
-compiled paper. Large frozen inputs should be distributed as a release or
-research-data archive rather than committed to ordinary Git history.
+Bulk auction results and frozen elicitation packs are excluded from Git. The repository tracks the compact final analytic package, final experiment manifest, generated population and generation provenance. Large frozen inputs should be distributed through a versioned research-data archive.
